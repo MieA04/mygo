@@ -1,0 +1,178 @@
+# MyGo Compiler
+
+MyGo is a modern statically typed programming language designed to combine the simplicity of Go with advanced type system features (such as enhanced generics, Trait system, enums, etc.). This project is the reference compiler implementation for the MyGo language.
+
+## Table of Contents
+
+- [MyGo Compiler](#mygo-compiler)
+  - [Introduction](#introduction)
+    - [Significance of MyGo](#significance-of-mygo)
+    - [Current Stage](#current-stage)
+    - [Key Features](#key-features)
+    - [Upcoming Features](#upcoming-features)
+    - [Future Goals](#future-goals)
+  - [Build the Compiler](#build-the-compiler)
+    - [Prerequisites](#prerequisites)
+    - [Build Steps](#build-steps)
+  - [Quick Start](#quick-start)
+    - [Write Your First MyGo Program](#write-your-first-mygo-program)
+    - [Transpile Mode (Recommended)](#transpile-mode-recommended)
+    - [Build Mode (Experimental)](#build-mode-experimental)
+  - [Usage Guide](#usage-guide)
+    - [Command Line Arguments](#command-line-arguments)
+  - [Project Structure](#project-structure)
+  - [Documentation](#documentation)
+  - [Contribution](#contribution)
+
+## Introduction
+
+The MyGo compiler currently adopts a **Source-to-Source** compilation strategy, transpiling MyGo code into Go code, and then using the Go compiler to generate the final executable. This allows MyGo to seamlessly leverage the existing Go ecosystem and maintain high performance.
+
+### Significance of MyGo
+
+To rapidly validate new Trait system syntax and explore a statically typed programming language that aligns with modern development experiences.
+
+### Current Stage
+
+**MVP (Minimum Viable Product) stage**.
+
+### Key Features
+
+- **Enhanced Generics**: Supports `where` clause constraints.
+- **Trait System**: Flexible behavior composition, supporting `trait bind`.
+- **Algebraic Data Types**: Supports `enum` with data (Tagged Unions) and pattern matching (`match`).
+- **Modern Syntax**: Removes some Go boilerplate and introduces cleaner control flow.
+
+### Upcoming Features
+
+- **Annotations**
+- **Static Reflection**
+- **OS Thread Package**
+- **Integration with C Ecosystem**
+
+### Future Goals
+
+To rewrite the entire language framework after absorbing sufficient value from the Go ecosystem, transition to full self-bootstrapping while maintaining syntax stability, and pave the way for the future `capy` language.
+
+## Build the Compiler
+
+### Prerequisites
+
+- **Go 1.20+**: Required as the compiler itself uses Go generics.
+- **Make** (Optional): For running build scripts (if available).
+
+### Build Steps
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/miea04/mygo.git
+   cd mygo
+   ```
+
+2. Build the MyGo compiler:
+   ```bash
+   # Windows
+   go build -o mygo.exe ./cmd/mygo
+
+   # Linux / macOS
+   go build -o mygo ./cmd/mygo
+   ```
+
+3. Verify installation:
+   ```bash
+   ./mygo.exe --help
+   # Or run directly to see default demo
+   ./mygo.exe
+   ```
+
+## Quick Start
+
+### Write Your First MyGo Program
+
+Create a file named `hello.mygo`:
+
+```mygo
+package main
+
+fn main() {
+    fmt.Println("Hello, MyGo!");
+}
+```
+
+### Transpile Mode (Recommended)
+
+The most stable way currently is to transpile MyGo code to Go code first, then run it.
+
+1. **Transpile**:
+   ```bash
+   ./mygo.exe transpile -o hello.go hello.mygo
+   ```
+
+2. **Run**:
+   ```bash
+   go run hello.go
+   # Output: Hello, MyGo!
+   ```
+
+### Build Mode (Experimental)
+
+The compiler also attempts to encapsulate the build process (currently under development, might not support single-file compilation perfectly, recommended for package compilation).
+
+```bash
+./mygo.exe build -o hello.exe .
+```
+
+## Usage Guide
+
+### Command Line Arguments
+
+The MyGo compiler supports the following subcommands:
+
+#### `transpile` - Transpile Code
+
+Transpiles MyGo source code to Go source code.
+
+```bash
+mygo transpile [options] <source.mygo|directory>
+```
+
+- `-o <file>`: Specify the output Go file path.
+- `-root <dir>`: Specify the root directory for package resolution (default is current directory).
+
+#### `build` - Build Project
+
+Compiles a MyGo project into an executable.
+
+```bash
+mygo build [options] <source.mygo|directory>
+```
+
+- `-o <file>`: Specify the output executable file path.
+- `-root <dir>`: Specify the project root directory.
+- `-keep-work-dir`: Keep temporary directories during compilation (for debugging).
+
+## Project Structure
+
+- `cmd/mygo/`: Compiler entry point (`main.go`).
+- `pkg/`: Core library code.
+  - `ast/`: ANTLR4 generated syntax tree nodes and parser.
+  - `compiler/`: Compiler core logic (Loader, Semantic Analysis, Transpiler).
+  - `build/`: Build system logic.
+- `MyGo.g4`: ANTLR4 grammar definition file.
+
+## Documentation
+
+For detailed syntax and design documentation, please refer to the `docs/` directory:
+
+- [Syntax Reference](docs/语法/)
+  - [01 Basic Syntax](docs/语法/01_基础语法.md)
+  - [02 Control Flow](docs/语法/02_流程控制.md)
+  - [03 Functions & Closures](docs/语法/03_函数与闭包.md)
+  - [04 Data Structures](docs/语法/04_数据结构.md)
+  - [05 OOP & Generics](docs/语法/05_面向对象与泛型.md)
+  - [06 Error Handling & Concurrency](docs/语法/06_错误处理与并发.md)
+  - [07 Packages & Visibility](docs/语法/07_包管理与可见性.md)
+
+## Contribution
+
+Issues and Pull Requests are welcome!

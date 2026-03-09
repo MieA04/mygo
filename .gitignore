@@ -1,0 +1,14 @@
+# Binaries
+*.exe
+dist/
+
+# Documentation (as requested)
+docs/
+
+# Tests (as requested)
+tests/
+
+# Other
+.idea/
+.vscode/
+*.log
