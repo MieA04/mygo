@@ -100,7 +100,8 @@ trait Show {
     fn String(): string;
 }
 
-fn printShow<T>(item: T) where T: Show {
+where T: Show
+fn printShow<T>(item: T) {
     fmt.Println(item.String());
 }
 ```
