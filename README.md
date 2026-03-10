@@ -146,6 +146,13 @@ fn main() {
 
 Since MyGo transpiles to Go, you can mix `.mygo` and `.go` files in the same project. They will be compiled together into a single Go binary.
 
+### Go Dependency Support
+
+MyGo is designed to be fully compatible with the Go ecosystem:
+- **Direct Import**: You can import any Go standard library or third-party package directly in your `.mygo` files (e.g., `import "encoding/json";`).
+- **Go Modules**: MyGo leverages the existing `go.mod` and `go.sum` files for dependency management. Just run `go get` to add dependencies and use them in MyGo.
+- **Single File Compilation**: You can transpile and run a single `.mygo` file without any configuration files or complex project structures.
+
 ## Build the Compiler
 
 ### Prerequisites
