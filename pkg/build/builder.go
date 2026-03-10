@@ -209,11 +209,12 @@ func (b *Builder) loadPackage() (*compiler.Package, error) {
 	if stat.IsDir() {
 		pkg, err = b.Loader.LoadPackage(importPath)
 	} else {
-		// TODO: Handle single file build if needed, for now assuming dir build or adapting logic
-		// If it's a file, we treat parent dir as package but filter for that file?
-		// Or create ad-hoc package like in main.go
-		// For RFC-005, let's focus on directory/package build as primary
-		return nil, fmt.Errorf("single file build not fully supported in new builder yet")
+		// Single file build
+		// We treat the file as a package (handled by Loader)
+		pkg, err = b.Loader.LoadPackage(importPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load single file package %s: %w", importPath, err)
+		}
 	}
 
 	if err != nil {
@@ -291,11 +292,21 @@ func (b *Builder) goBuild(workDir, mainPkgName, outputPath string) error {
 	if err != nil {
 		return err
 	}
+
+	// If source is a file, target the directory containing it
+	// because transpile generates .go files in that directory
+	stat, _ := os.Stat(b.Options.SourcePath)
+	if !stat.IsDir() {
+		relPath = filepath.Dir(relPath)
+	}
+
 	buildTarget := "./" + filepath.ToSlash(relPath)
 	if relPath == "." {
 		buildTarget = "."
 	}
 
+	// Construct go build command
+	// Note: buildTarget must be a package path (directory) or go files
 	cmd := exec.Command("go", "build", "-o", absOutput, buildTarget)
 	cmd.Dir = workDir
 	// Inherit environment variables
