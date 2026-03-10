@@ -14,6 +14,13 @@ MyGo is a modern statically typed programming language designed to combine the s
     - [Key Features](#key-features)
     - [Upcoming Features](#upcoming-features)
     - [Future Goals](#future-goals)
+  - [Language Features](#language-features)
+    - [Variable \& Function](#variable--function)
+    - [Control Flow](#control-flow)
+    - [Traits \& Generics](#traits--generics)
+  - [Interoperability with Go](#interoperability-with-go)
+    - [Importing Go Packages](#importing-go-packages)
+    - [Mixed Compilation](#mixed-compilation)
   - [Build the Compiler](#build-the-compiler)
     - [Prerequisites](#prerequisites)
     - [Build Steps](#build-steps)
@@ -58,6 +65,64 @@ To rapidly validate new Trait system syntax and explore a statically typed progr
 ### Future Goals
 
 To rewrite the entire language framework after absorbing sufficient value from the Go ecosystem, transition to full self-bootstrapping while maintaining syntax stability, and pave the way for the future `capy` language.
+
+## Language Features
+
+### Variable & Function
+
+MyGo uses `let` and `const` for variable declarations, and `fn` for functions.
+
+```mygo
+fn add(a: int, b: int): int {
+    let result = a + b;
+    return result;
+}
+```
+
+### Control Flow
+
+MyGo provides powerful control flow structures like `match`.
+
+```mygo
+match x {
+    1 => fmt.Println("One");
+    is int => fmt.Println("Is Integer");
+    other => fmt.Println("Other");
+}
+```
+
+### Traits & Generics
+
+Traits define behavior, and generics support `where` clauses.
+
+```mygo
+trait Show {
+    fn String(): string;
+}
+
+fn printShow<T>(item: T) where T: Show {
+    fmt.Println(item.String());
+}
+```
+
+## Interoperability with Go
+
+### Importing Go Packages
+
+MyGo is fully compatible with the Go ecosystem. You can import and use any Go package directly.
+
+```mygo
+import "fmt";
+import "net/http";
+
+fn main() {
+    fmt.Println("Hello from Go package!");
+}
+```
+
+### Mixed Compilation
+
+Since MyGo transpiles to Go, you can mix `.mygo` and `.go` files in the same project. They will be compiled together into a single Go binary.
 
 ## Build the Compiler
 
