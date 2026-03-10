@@ -1,5 +1,7 @@
 # MyGo Compiler
 
+[English](README.md) | [简体中文](README-zh.md)
+
 MyGo is a modern statically typed programming language designed to combine the simplicity of Go with advanced type system features (such as enhanced generics, Trait system, enums, etc.). This project is the reference compiler implementation for the MyGo language.
 
 ## Table of Contents
