@@ -7,6 +7,7 @@ MyGo is a modern statically typed programming language designed to combine the s
 ## Table of Contents
 
 - [MyGo Compiler](#mygo-compiler)
+  - [Table of Contents](#table-of-contents)
   - [Introduction](#introduction)
     - [Significance of MyGo](#significance-of-mygo)
     - [Current Stage](#current-stage)
@@ -22,6 +23,8 @@ MyGo is a modern statically typed programming language designed to combine the s
     - [Build Mode (Experimental)](#build-mode-experimental)
   - [Usage Guide](#usage-guide)
     - [Command Line Arguments](#command-line-arguments)
+      - [`transpile` - Transpile Code](#transpile---transpile-code)
+      - [`build` - Build Project](#build---build-project)
   - [Project Structure](#project-structure)
   - [Documentation](#documentation)
   - [Contribution](#contribution)
@@ -47,10 +50,10 @@ To rapidly validate new Trait system syntax and explore a statically typed progr
 
 ### Upcoming Features
 
-- **Annotations**
-- **Static Reflection**
-- **OS Thread Package**
-- **Integration with C Ecosystem**
+- **Annotations**: RFC-007
+- **Static Reflection**: RFC-008
+- **OS Thread Package**: RFC-009
+- **Integration with C Ecosystem**: RFC-010
 
 ### Future Goals
 
