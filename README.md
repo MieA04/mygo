@@ -164,6 +164,7 @@ Create a file named `hello.mygo`:
 
 ```mygo
 package main
+import "fmt";
 
 fn main() {
     fmt.Println("Hello, MyGo!");
