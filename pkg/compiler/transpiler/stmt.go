@@ -2,6 +2,7 @@ package transpiler
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/antlr4-go/antlr/v4"
@@ -15,10 +16,18 @@ func (v *MyGoTranspiler) VisitStatement(ctx *ast.StatementContext) interface{} {
 	if child == nil {
 		return nil
 	}
+
+	var res interface{}
 	if tree, ok := child.(antlr.ParseTree); ok {
-		return tree.Accept(v)
+		res = tree.Accept(v)
 	}
-	return nil
+
+	if resStr, ok := res.(string); ok && v.CurrentFile != "" {
+		line := ctx.GetStart().GetLine()
+		path := filepath.ToSlash(v.CurrentFile)
+		return fmt.Sprintf("//line %s:%d\n%s", path, line, resStr)
+	}
+	return res
 }
 
 func (v *MyGoTranspiler) VisitBlock(ctx *ast.BlockContext) interface{} {

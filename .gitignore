@@ -7,6 +7,8 @@ docs/
 
 # Tests (as requested)
 tests/
+test/
+test_project/
 
 # Other
 .idea/

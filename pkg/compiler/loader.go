@@ -65,18 +65,33 @@ func (l *PackageLoader) LoadPackage(importPath string) (*Package, error) {
 		for _, entry := range entries {
 			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".mygo") {
 				path := filepath.Join(dirPath, entry.Name())
+
+				// Read file for SourceFile.Code
 				content, err := os.ReadFile(path)
 				if err != nil {
 					return nil, err
 				}
 
-				input := antlr.NewInputStream(string(content))
+				// Create ANTLR stream
+				input, err := antlr.NewFileStream(path)
+				if err != nil {
+					return nil, err
+				}
+
 				lexer := ast.NewMyGoLexer(input)
 				stream := antlr.NewCommonTokenStream(lexer, antlr.TokenDefaultChannel)
 				parser := ast.NewMyGoParser(stream)
-				// parser.RemoveErrorListeners() // Optional
-				parser.AddErrorListener(antlr.NewDiagnosticErrorListener(true))
+
+				// Error handling
+				parser.RemoveErrorListeners()
+				errorListener := &LoaderErrorListener{}
+				parser.AddErrorListener(errorListener)
+
 				tree := parser.Program()
+
+				if len(errorListener.Errors) > 0 {
+					return nil, fmt.Errorf("syntax errors in %s:\n%s", path, strings.Join(errorListener.Errors, "\n"))
+				}
 
 				file := &SourceFile{
 					Path: path,
@@ -158,4 +173,13 @@ func (l *PackageLoader) LoadPackage(importPath string) (*Package, error) {
 	}
 
 	return nil, fmt.Errorf("package not found: %s (tried MyGo at %s, and Go package)", importPath, dirPath)
+}
+
+type LoaderErrorListener struct {
+	*antlr.DefaultErrorListener
+	Errors []string
+}
+
+func (l *LoaderErrorListener) SyntaxError(recognizer antlr.Recognizer, offendingSymbol interface{}, line, column int, msg string, e antlr.RecognitionException) {
+	l.Errors = append(l.Errors, fmt.Sprintf("line %d:%d %s", line, column, msg))
 }

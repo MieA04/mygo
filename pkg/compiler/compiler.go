@@ -11,7 +11,25 @@ import (
 )
 
 // TranspilePackage transpiles a single MyGo package to Go code.
-func TranspilePackage(pkg *Package, loader *PackageLoader, moduleName string) (string, error) {
+func TranspilePackage(pkg *Package, loader *PackageLoader, moduleName string, emitHelpers bool) (string, error) {
+	// Pass 1: Symbol Collection
+	collector := semantic.NewDeclarationCollector(pkg.Scope)
+	methodCollector := semantic.NewMethodCollector(pkg.Scope)
+
+	for _, f := range pkg.Files {
+		collector.SetCompilationUnit(pkg.Name, f.Path)
+		for _, stmt := range f.AST.AllStatement() {
+			stmt.Accept(collector)
+		}
+	}
+
+	for _, f := range pkg.Files {
+		methodCollector.SetCompilationUnit(pkg.Name, f.Path)
+		for _, stmt := range f.AST.AllStatement() {
+			stmt.Accept(methodCollector)
+		}
+	}
+
 	// Pass 2: Semantic Analysis
 	analyzer := semantic.NewSemanticAnalyzer(pkg.Scope)
 
@@ -46,7 +64,8 @@ func TranspilePackage(pkg *Package, loader *PackageLoader, moduleName string) (s
 	var body strings.Builder
 
 	// Helpers
-	body.WriteString(`
+	if emitHelpers {
+		body.WriteString(`
 func _mygo_must[T any](v T, err error) T {
 	if err != nil {
 		panic(err)
@@ -54,8 +73,10 @@ func _mygo_must[T any](v T, err error) T {
 	return v
 }
 `)
+	}
 
 	for _, f := range pkg.Files {
+		myTranspiler.SetCurrentFile(f.Path)
 		for _, stmt := range f.AST.AllStatement() {
 			res := stmt.Accept(myTranspiler)
 			if res != nil {
@@ -64,7 +85,7 @@ func _mygo_must[T any](v T, err error) T {
 		}
 	}
 
-	if myTranspiler.NeedsTernaryHelper() {
+	if myTranspiler.NeedsTernaryHelper() && emitHelpers {
 		body.WriteString(`
 func _mygo_ternary[T any](cond bool, a, b T) T {
 	if cond {

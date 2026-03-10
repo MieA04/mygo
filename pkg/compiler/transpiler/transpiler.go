@@ -29,6 +29,7 @@ type MyGoTranspiler struct {
 	currentBindVar       string
 	currentBindTypeDef   string
 	expectedType         string
+	CurrentFile          string // Path to the current MyGo source file
 }
 
 func NewMyGoTranspiler(global *symbols.Scope) *MyGoTranspiler {
@@ -37,6 +38,10 @@ func NewMyGoTranspiler(global *symbols.Scope) *MyGoTranspiler {
 		Scope:           global,
 		CurrentScope:    global,
 	}
+}
+
+func (v *MyGoTranspiler) SetCurrentFile(path string) {
+	v.CurrentFile = path
 }
 
 func (v *MyGoTranspiler) resolveType(ctx ast.ITypeTypeContext) string {
