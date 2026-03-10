@@ -3,12 +3,13 @@ package symbols
 type SymbolKind string
 
 const (
-	KindEnum    SymbolKind = "enum"
-	KindStruct  SymbolKind = "struct"
-	KindFunc    SymbolKind = "func"
-	KindVar     SymbolKind = "var"
-	KindTrait   SymbolKind = "trait"
-	KindPackage SymbolKind = "package"
+	KindEnum       SymbolKind = "enum"
+	KindStruct     SymbolKind = "struct"
+	KindFunc       SymbolKind = "func"
+	KindVar        SymbolKind = "var"
+	KindTrait      SymbolKind = "trait"
+	KindPackage    SymbolKind = "package"
+	KindAnnotation SymbolKind = "annotation"
 )
 
 type Visibility string
@@ -43,5 +44,12 @@ type Symbol struct {
 	Variants             map[string]*Symbol // For Enums: Variant Name -> Variant Symbol
 	Fields               map[string]string  // For Structs/Variants: Field Name -> Field Type
 	BoundTraits          map[string]struct{}
-	ImportedScope        *Scope // For KindPackage: The scope of the imported package
+	ImportedScope        *Scope        // For KindPackage: The scope of the imported package
+	ASTNode              interface{}   // For Macros: Store the AST node
+	Annotations          []*Annotation // List of annotations applied to this symbol
+}
+
+type Annotation struct {
+	Name string
+	Args []string // Store raw string representation or simplified values of arguments
 }

@@ -10,7 +10,6 @@ import (
 	"github.com/miea04/mygo/pkg/ast"
 	"github.com/miea04/mygo/pkg/compiler"
 	"github.com/miea04/mygo/pkg/compiler/core"
-	"github.com/miea04/mygo/pkg/compiler/semantic"
 	"github.com/miea04/mygo/pkg/compiler/symbols"
 	"github.com/spf13/cobra"
 )
@@ -71,11 +70,21 @@ var transpileCmd = &cobra.Command{
 				}
 
 				// Parse imports
-				for _, child := range tree.GetChildren() {
-					if importStmt, ok := child.(*ast.ImportStmtContext); ok {
-						rawStr := importStmt.STRING().GetText()
-						importPath := strings.Trim(rawStr, "\"")
-						pkg.Files[0].Imports = append(pkg.Files[0].Imports, core.ImportSpec{Path: importPath})
+				for _, importStmt := range tree.AllImportStmt() {
+					if blockCtx, ok := importStmt.(*ast.BlockImportContext); ok {
+						for _, spec := range blockCtx.AllImportSpec() {
+							if specCtx, ok := spec.(*ast.ImportSpecContext); ok {
+								rawStr := specCtx.STRING().GetText()
+								importPath := strings.Trim(rawStr, "\"")
+								pkg.Files[0].Imports = append(pkg.Files[0].Imports, core.ImportSpec{Path: importPath})
+							}
+						}
+					} else if singleCtx, ok := importStmt.(*ast.SingleImportContext); ok {
+						if specCtx, ok := singleCtx.ImportSpec().(*ast.ImportSpecContext); ok {
+							rawStr := specCtx.STRING().GetText()
+							importPath := strings.Trim(rawStr, "\"")
+							pkg.Files[0].Imports = append(pkg.Files[0].Imports, core.ImportSpec{Path: importPath})
+						}
 					}
 				}
 
@@ -95,20 +104,6 @@ var transpileCmd = &cobra.Command{
 						ImportedScope: importedPkg.Scope,
 					}
 					pkg.Scope.DefineSymbol(sym)
-				}
-
-				// Collect decls
-				collector := semantic.NewDeclarationCollector(pkg.Scope)
-				collector.SetCompilationUnit("main", sourcePath)
-				for _, stmt := range tree.AllStatement() {
-					stmt.Accept(collector)
-				}
-
-				// Collect methods
-				methodCollector := semantic.NewMethodCollector(pkg.Scope)
-				methodCollector.SetCompilationUnit("main", sourcePath)
-				for _, stmt := range tree.AllStatement() {
-					stmt.Accept(methodCollector)
 				}
 			}
 		} else {

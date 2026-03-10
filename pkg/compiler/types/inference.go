@@ -184,12 +184,6 @@ func SplitTopLevelTypeArgs(s string) []string {
 func NormalizeTypeName(typeName string) string {
 	t := strings.TrimSpace(typeName)
 	t = strings.ReplaceAll(t, " ", "")
-	if t == "byte[]" {
-		return "[]byte"
-	}
-	if t == "rune[]" {
-		return "[]rune"
-	}
 	return t
 }
 
@@ -222,16 +216,16 @@ func ElemTypeOfPointer(typeName string) string {
 }
 
 func IsByteSliceType(typeName string) bool {
-	return NormalizeTypeName(typeName) == "[]byte"
+	return NormalizeTypeName(typeName) == "byte[]"
 }
 
 func IsRuneSliceType(typeName string) bool {
-	return NormalizeTypeName(typeName) == "[]rune"
+	return NormalizeTypeName(typeName) == "rune[]"
 }
 
 func IsNilCompatible(typeName string, scope *symbols.Scope) bool {
 	t := NormalizeTypeName(typeName)
-	if strings.HasPrefix(t, "*") || strings.HasPrefix(t, "[]") || strings.HasPrefix(t, "map[") || strings.HasPrefix(t, "func") {
+	if strings.HasPrefix(t, "*") || strings.HasSuffix(t, "[]") || strings.HasPrefix(t, "map[") || strings.HasPrefix(t, "func") {
 		return true
 	}
 	// Check if it's a trait
@@ -478,28 +472,62 @@ func FormatVisibility(name string, modCtx ast.IModifierContext) string {
 	return strings.ToLower(name[:1]) + name[1:]
 }
 
-func SniffType(expr antlr.ParseTree) string {
-	arrCtx, ok := expr.(*ast.ArrayLiteralExprContext)
-	if !ok || arrCtx.ExprList() == nil {
-		return "[]interface{}"
+func SniffArrayType(arrCtx *ast.ArrayLiteralExprContext, scope *symbols.Scope) string {
+	if arrCtx.ExprList() == nil {
+		return "interface{}[]"
 	}
-	switch arrCtx.ExprList().(*ast.ExprListContext).Expr(0).(type) {
-	case *ast.IntExprContext:
-		return "[]int"
-	case *ast.StringExprContext:
-		return "[]string"
-	case *ast.FloatExprContext:
-		return "[]float64"
-	default:
-		return "[]interface{}"
+
+	exprList := arrCtx.ExprList().(*ast.ExprListContext).AllExpr()
+	if len(exprList) == 0 {
+		return "interface{}[]"
 	}
+
+	var commonType string
+	first := true
+
+	for _, expr := range exprList {
+		t := InferExprType(expr, scope)
+		if t == "unknown" {
+			continue // Skip unknown types or treat as potential interface{}? Let's skip for now to see if others give info
+		}
+
+		if first {
+			commonType = t
+			first = false
+			continue
+		}
+
+		if commonType == t {
+			continue
+		}
+
+		// Try to unify
+		if common, ok := CommonNumericType(commonType, t); ok {
+			commonType = common
+		} else if IsNilCompatible(commonType, scope) && t == "nil" {
+			// keep commonType
+		} else if IsNilCompatible(t, scope) && commonType == "nil" {
+			commonType = t
+		} else {
+			// Check for struct compatibility (e.g. same struct name)
+			// Since we use string names, exact match is usually required for structs.
+			// If mismatch, fallback to interface{}
+			return "interface{}[]"
+		}
+	}
+
+	if commonType == "" || commonType == "nil" {
+		return "interface{}[]"
+	}
+
+	return commonType + "[]"
 }
 
 func ExtractCollectionTypes(colType string, scope *symbols.Scope) (kType string, vType string) {
 	kType, vType = "unknown", "unknown"
-	if strings.HasPrefix(colType, "[]") {
+	if strings.HasSuffix(colType, "[]") {
 		kType = "int"
-		vType = strings.TrimPrefix(colType, "[]")
+		vType = colType[:len(colType)-2]
 		return
 	} else if strings.HasPrefix(colType, "map[") {
 		idx := strings.Index(colType, "]")
@@ -639,7 +667,7 @@ func InferExprType(expr antlr.ParseTree, scope *symbols.Scope) string {
 	case *ast.FloatExprContext:
 		return "float64"
 	case *ast.ArrayLiteralExprContext:
-		return SniffType(e)
+		return SniffArrayType(e, scope)
 	case *ast.LambdaExprContext:
 		return "func"
 	case *ast.StructLiteralExprContext:
@@ -755,6 +783,55 @@ func InferExprType(expr antlr.ParseTree, scope *symbols.Scope) string {
 			}
 			return "chan<any>"
 		}
+		if callee == "slice" {
+			if e.TypeArgs() != nil {
+				args := SplitTopLevelTypeArgs(e.TypeArgs().GetText()[1 : len(e.TypeArgs().GetText())-1])
+				if len(args) > 0 {
+					ret := ResolveTypeWithScope(args[0], scope) + "[]"
+					return ret
+				}
+			}
+			return "any[]"
+		}
+
+		// Check if it is a method call parsed as FuncCallExpr (e.g. slice.len())
+		parts := strings.Split(callee, ".")
+		if len(parts) > 1 {
+			objName := strings.Join(parts[:len(parts)-1], ".")
+			methodName := parts[len(parts)-1]
+
+			// Resolve symbol to check if it is a slice
+			sym := scope.ResolveQualified(objName)
+			if sym == nil {
+				sym = scope.Resolve(objName)
+			}
+
+			if sym != nil && sym.Kind == symbols.KindVar {
+				objType := sym.Type
+				if strings.HasSuffix(objType, "[]") || strings.HasPrefix(objType, "[]") {
+					elemType := ""
+					if strings.HasSuffix(objType, "[]") {
+						elemType = strings.TrimSuffix(objType, "[]")
+					} else {
+						elemType = strings.TrimPrefix(objType, "[]")
+					}
+
+					switch methodName {
+					case "len", "cap", "index_of":
+						return "int"
+					case "is_empty", "contains":
+						return "bool"
+					case "clone", "append", "insert", "remove_range":
+						return objType
+					case "remove", "pop", "max", "min":
+						return elemType
+					case "reverse", "sort", "clear":
+						return "void"
+					}
+				}
+			}
+		}
+
 		if sym := scope.ResolveQualified(callee); sym != nil && sym.Kind == symbols.KindFunc {
 			baseType := sym.Type
 			if len(sym.GenericParams) > 0 {
@@ -767,9 +844,9 @@ func InferExprType(expr antlr.ParseTree, scope *symbols.Scope) string {
 			return baseType
 		}
 		// Handle enum variant constructor Enum.Variant
-		parts := strings.Split(callee, ".")
-		if len(parts) == 2 {
-			enumName := parts[0]
+		enumParts := strings.Split(callee, ".")
+		if len(enumParts) == 2 {
+			enumName := enumParts[0]
 			if enumSym := scope.ResolveQualified(enumName); enumSym != nil && enumSym.Kind == symbols.KindEnum {
 				if e.TypeArgs() != nil {
 					return enumName + ParseTypeArgs(e.TypeArgs())
@@ -822,6 +899,30 @@ func InferExprType(expr antlr.ParseTree, scope *symbols.Scope) string {
 		}
 		// General method call
 		objType := InferExprType(e.Expr(), scope)
+
+		// Slice method return type inference
+		if strings.HasSuffix(objType, "[]") || strings.HasPrefix(objType, "[]") {
+			methodName := e.ID().GetText()
+			elemType := ""
+			if strings.HasSuffix(objType, "[]") {
+				elemType = strings.TrimSuffix(objType, "[]")
+			} else {
+				elemType = strings.TrimPrefix(objType, "[]")
+			}
+
+			switch methodName {
+			case "len", "cap", "index_of":
+				return "int"
+			case "is_empty", "contains":
+				return "bool"
+			case "clone", "append", "insert", "remove_range":
+				return objType
+			case "remove", "pop", "max", "min":
+				return elemType
+			case "reverse", "sort", "clear":
+				return "void"
+			}
+		}
 
 		if IsChannelType(objType) {
 			methodName := e.ID().GetText()

@@ -76,16 +76,72 @@ func (v *MyGoTranspiler) VisitEnumDecl(ctx *ast.EnumDeclContext) interface{} {
 	return sb.String()
 }
 
+func (v *MyGoTranspiler) VisitAnnotationDecl(ctx *ast.AnnotationDeclContext) interface{} {
+	// Macros are compile-time constructs and should not appear in the output Go code
+	return ""
+}
+
 func (v *MyGoTranspiler) VisitStructDecl(ctx *ast.StructDeclContext) interface{} {
-	goStructName := types.FormatVisibility(ctx.ID().GetText(), ctx.Modifier())
+	structName := ctx.ID().GetText()
+	goStructName := types.FormatVisibility(structName, ctx.Modifier())
+
+	// Resolve or Define symbol to store annotations
+	sym := v.CurrentScope.Resolve(structName)
+	if sym == nil {
+		sym = v.CurrentScope.Define(structName, goStructName, symbols.KindStruct, "")
+	}
+	// Clear existing annotations to avoid duplication
+	sym.Annotations = nil
+
+	// RFC-007: Handle Annotations
+	var activeAnnotations []string
+	for _, annCtx := range ctx.AllAnnotationUsage() {
+		annName := annCtx.ID().GetText()
+		var args []string
+		if exprList := annCtx.ExprList(); exprList != nil {
+			for _, expr := range exprList.(*ast.ExprListContext).AllExpr() {
+				args = append(args, expr.GetText())
+			}
+		}
+
+		// Add to symbol
+		ann := &symbols.Annotation{Name: annName, Args: args}
+		sym.Annotations = append(sym.Annotations, ann)
+		// v.CurrentScope.AddAnnotation(annName, sym) // Removed to avoid duplication with Collector
+
+		if annName == "Derive" {
+			for _, arg := range args {
+				// Simple check for "Json" identifier
+				if arg == "Json" {
+					activeAnnotations = append(activeAnnotations, "Json")
+				}
+			}
+		} else if annName == "Builder" {
+			// Phase 1: Support @Builder marker, implementation later if needed
+			activeAnnotations = append(activeAnnotations, "Builder")
+		}
+	}
+
+	v.CurrentStructAnnotations[structName] = activeAnnotations
+	v.CurrentProcessingStruct = structName
+	defer func() {
+		v.CurrentProcessingStruct = ""
+		// v.CurrentStructAnnotations is kept for global access if needed, or clear it?
+		// RFC says find_all_annotated_with, so we should keep it.
+	}()
+
 	defParams, _ := types.ParseTypeParams(ctx.TypeParams(), v.CurrentScope)
-	if sym := v.CurrentScope.Resolve(ctx.ID().GetText()); sym != nil && len(sym.GenericParams) > 0 {
+	if sym != nil && len(sym.GenericParams) > 0 {
 		defParams, _ = types.ParseGenericParamMeta(sym.GenericParams)
 	}
 	var fields []string
 	for _, fCtx := range ctx.AllStructField() {
 		fields = append(fields, "\t"+fCtx.Accept(v).(string))
 	}
+
+	// RFC-007: Generate Builder if @Builder is present
+	// For Phase 1, we just return the struct.
+
 	return fmt.Sprintf("type %s%s struct {\n%s\n}", goStructName, defParams, strings.Join(fields, "\n"))
 }
 
@@ -166,7 +222,27 @@ func (v *MyGoTranspiler) VisitTraitFnDecl(ctx *ast.TraitFnDeclContext) interface
 }
 
 func (v *MyGoTranspiler) VisitStructField(ctx *ast.StructFieldContext) interface{} {
-	return fmt.Sprintf("%s %s", ctx.ID().GetText(), v.resolveType(ctx.TypeType()))
+	fieldName := ctx.ID().GetText()
+	fieldType := v.resolveType(ctx.TypeType())
+
+	// RFC-007: Check for @Derive(Json)
+	var tags []string
+	if v.CurrentProcessingStruct != "" {
+		annotations := v.CurrentStructAnnotations[v.CurrentProcessingStruct]
+		for _, ann := range annotations {
+			if ann == "Json" {
+				// Use field name as json tag
+				tags = append(tags, fmt.Sprintf("json:\"%s\"", fieldName))
+			}
+		}
+	}
+
+	tagStr := ""
+	if len(tags) > 0 {
+		tagStr = fmt.Sprintf(" `%s`", strings.Join(tags, " "))
+	}
+
+	return fmt.Sprintf("%s %s%s", fieldName, fieldType, tagStr)
 }
 
 func (v *MyGoTranspiler) VisitBindTraitDecl(ctx *ast.BindTraitDeclContext) interface{} {
@@ -335,7 +411,75 @@ func (v *MyGoTranspiler) resolveCombsTraits(ctx *ast.BindTraitDeclContext) []*sy
 
 func (v *MyGoTranspiler) VisitFnDecl(ctx *ast.FnDeclContext) interface{} {
 	fnName := ctx.ID().GetText()
+
+	// RFC-007: Handle @Init
+	if v.currentImplType == "" {
+		for _, annCtx := range ctx.AllAnnotationUsage() {
+			if annCtx.ID().GetText() == "Init" {
+				goFnName := types.FormatVisibility(fnName, ctx.Modifier())
+				v.InitFunctions = append(v.InitFunctions, goFnName)
+			}
+		}
+	}
+
+	// RFC-007: Check for custom macros (Phase 2)
+	var macroName string
+	if v.currentImplType == "" {
+		for _, annCtx := range ctx.AllAnnotationUsage() {
+			annName := annCtx.ID().GetText()
+			if annName != "Init" && annName != "Derive" && annName != "Builder" {
+				macroName = annName
+				break
+			}
+		}
+	}
+
+	if macroName != "" {
+		origName := "_mygo_orig_" + fnName
+		origCode := v.transpileFnDecl(ctx, origName)
+
+		wrapperBody := v.executeMacro(macroName, ctx)
+		if wrapperBody == "" {
+			return v.transpileFnDecl(ctx, "")
+		}
+
+		v.CurrentOriginalFnName = origName
+		wrapperBodyGo := v.transpileMacroResult(wrapperBody)
+		v.CurrentOriginalFnName = ""
+
+		dummyCode := v.transpileFnDecl(ctx, "")
+		idx := strings.Index(dummyCode, "{")
+		if idx != -1 {
+			sig := dummyCode[:idx]
+			return origCode + "\n\n" + sig + " {\n" + wrapperBodyGo + "\n}"
+		}
+	}
+
+	return v.transpileFnDecl(ctx, "")
+}
+
+func (v *MyGoTranspiler) transpileFnDecl(ctx *ast.FnDeclContext, overrideName string) string {
+	fnName := ctx.ID().GetText()
 	goFnName := types.FormatVisibility(fnName, ctx.Modifier())
+	if overrideName != "" {
+		goFnName = overrideName
+	}
+
+	// RFC-007: Handle @Init logic is now inside transpiler.InitFunctions collection
+	// We don't need to change generation logic here, just collecting.
+	// But VisitFnDecl is called recursively? No, it's called by VisitStatement.
+	// The collection happens in VisitFnDecl (the wrapper one).
+	// Since we delegate to transpileFnDecl, we should move the collection logic here or keep it in VisitFnDecl?
+	// The original VisitFnDecl had collection logic.
+	// We should keep it. But if we call transpileFnDecl twice (dummy call), we might double collect?
+	// Yes.
+	// So collection should be in VisitFnDecl, BEFORE calling transpileFnDecl.
+	// But transpileFnDecl is the one generating code.
+	// Collection relies on AnnotationUsage.
+	// Let's keep collection in VisitFnDecl (the wrapper).
+	// Wait, if we use transpileFnDecl for original code, we don't want to collect Init again.
+	// So transpileFnDecl should NOT collect Init.
+
 	defParams, _ := types.ParseTypeParams(ctx.TypeParams(), v.CurrentScope)
 	if sym := v.CurrentScope.Resolve(fnName); sym != nil && len(sym.GenericParams) > 0 {
 		defParams, _ = types.ParseGenericParamMeta(sym.GenericParams)
@@ -357,6 +501,9 @@ func (v *MyGoTranspiler) VisitFnDecl(ctx *ast.FnDeclContext) interface{} {
 		if v.currentImplSymbol.Kind == symbols.KindEnum {
 			// Enum methods are standalone functions
 			goFnName = fmt.Sprintf("%s_%s", v.currentImplSymbol.GoName, fnName)
+			if overrideName != "" {
+				goFnName = overrideName // Override takes precedence
+			}
 		} else if v.currentImplSymbol.Kind == symbols.KindStruct {
 			// Struct methods use receiver
 			isStructMethod = true
@@ -472,13 +619,7 @@ func (v *MyGoTranspiler) VisitSingleLetDecl(ctx *ast.SingleLetDeclContext) inter
 			}
 			return fmt.Sprintf("_tmp, err := %s\nif err != nil %s\nvar %s %s = _tmp", cleanCall, blockCode, varName, declaredType)
 		}
-		_, isArrayLiteral := ctx.Expr().(*ast.ArrayLiteralExprContext)
-		if isArrayLiteral {
-			if declaredType == "" {
-				return fmt.Sprintf("%s := %s%s", varName, types.SniffType(ctx.Expr()), exprGoCode)
-			}
-			return fmt.Sprintf("var %s %s = %s%s", varName, declaredType, declaredType, exprGoCode)
-		}
+
 		if declaredType == "" {
 			return fmt.Sprintf("%s := %s", varName, exprGoCode)
 		}

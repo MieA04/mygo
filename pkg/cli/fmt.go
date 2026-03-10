@@ -341,9 +341,29 @@ func (p *PrettyPrinter) VisitPackageDecl(ctx *ast.PackageDeclContext) interface{
 	return "package " + ctx.ID().GetText()
 }
 
-func (p *PrettyPrinter) VisitImportStmt(ctx *ast.ImportStmtContext) interface{} {
-	// Simple import reconstruction
-	return "import " + ctx.STRING().GetText() + ";"
+func (p *PrettyPrinter) VisitBlockImport(ctx *ast.BlockImportContext) interface{} {
+	var sb strings.Builder
+	sb.WriteString("import {\n")
+	p.indentLevel++
+	for _, spec := range ctx.AllImportSpec() {
+		sb.WriteString(p.indent())
+		sb.WriteString(p.accept(spec))
+		sb.WriteString(",\n")
+	}
+	p.indentLevel--
+	sb.WriteString(p.indent() + "}")
+	return sb.String()
+}
+
+func (p *PrettyPrinter) VisitSingleImport(ctx *ast.SingleImportContext) interface{} {
+	return "import " + p.accept(ctx.ImportSpec())
+}
+
+func (p *PrettyPrinter) VisitImportSpec(ctx *ast.ImportSpecContext) interface{} {
+	if ctx.ID() != nil {
+		return ctx.STRING().GetText() + " as " + ctx.ID().GetText()
+	}
+	return ctx.STRING().GetText()
 }
 
 func (p *PrettyPrinter) VisitFnDecl(ctx *ast.FnDeclContext) interface{} {

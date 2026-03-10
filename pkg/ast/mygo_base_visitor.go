@@ -15,11 +15,27 @@ func (v *BaseMyGoVisitor) VisitPackageDecl(ctx *PackageDeclContext) interface{} 
 	return v.VisitChildren(ctx)
 }
 
-func (v *BaseMyGoVisitor) VisitImportStmt(ctx *ImportStmtContext) interface{} {
+func (v *BaseMyGoVisitor) VisitBlockImport(ctx *BlockImportContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseMyGoVisitor) VisitSingleImport(ctx *SingleImportContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseMyGoVisitor) VisitImportSpec(ctx *ImportSpecContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
 func (v *BaseMyGoVisitor) VisitStatement(ctx *StatementContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseMyGoVisitor) VisitAnnotationDecl(ctx *AnnotationDeclContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseMyGoVisitor) VisitAnnotationTarget(ctx *AnnotationTargetContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
@@ -84,6 +100,10 @@ func (v *BaseMyGoVisitor) VisitWhereClause(ctx *WhereClauseContext) interface{} 
 }
 
 func (v *BaseMyGoVisitor) VisitGenericConstraint(ctx *GenericConstraintContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseMyGoVisitor) VisitAnnotationUsage(ctx *AnnotationUsageContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
@@ -336,6 +356,14 @@ func (v *BaseMyGoVisitor) VisitTryUnwrapExpr(ctx *TryUnwrapExprContext) interfac
 }
 
 func (v *BaseMyGoVisitor) VisitAddrOfExpr(ctx *AddrOfExprContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseMyGoVisitor) VisitQuoteExpr(ctx *QuoteExprContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseMyGoVisitor) VisitInnerCallExpr(ctx *InnerCallExprContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 

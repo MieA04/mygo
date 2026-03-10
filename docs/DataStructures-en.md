@@ -117,19 +117,19 @@ MyGo distinguishes between fixed-length arrays and dynamic-length slices.
 Arrays have a fixed length and are value types.
 
 ```mygo
-// Type representation: [length]Type
-let arr: [5]int = [1, 2, 3, 4, 5];
+// Type representation: Type[length]
+let arr: int[5] = [1, 2, 3, 4, 5];
 
 // Automatic inference
-let names = ["Alice", "Bob"]; // Inferred as [2]string
+let names = ["Alice", "Bob"]; // Inferred as string[2]
 ```
 
 ### 3.2 Slices
 Slices are references to underlying arrays and have variable length. This is the most commonly used sequence type in MyGo.
 
 ```mygo
-// Type representation: []Type (no length)
-let numbers: []int = [1, 2, 3]; 
+// Type representation: Type[] (no length)
+let numbers: int[] = [1, 2, 3]; 
 
 // Create slice from array
 let arr = [10, 20, 30, 40];

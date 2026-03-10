@@ -54,10 +54,10 @@ To rapidly validate new Trait system syntax and explore a statically typed progr
 - **Trait System**: Flexible behavior composition, supporting `trait bind`.
 - **Algebraic Data Types**: Supports `enum` with data (Tagged Unions) and pattern matching (`match`).
 - **Modern Syntax**: Removes some Go boilerplate and introduces cleaner control flow.
+- **Annotations & Metaprogramming**: Supports `@Derive`, `@macro` and compile-time code generation.
 
 ### Upcoming Features
 
-- **Annotations**: RFC-007
 - **Static Reflection**: RFC-008
 - **OS Thread Package**: RFC-009
 - **Integration with C Ecosystem**: RFC-010
@@ -103,6 +103,27 @@ trait Show {
 where T: Show
 fn printShow<T>(item: T) {
     fmt.Println(item.String());
+}
+```
+
+### Metaprogramming
+
+MyGo supports macros and annotations for compile-time code generation.
+
+```mygo
+@Derive(Json)
+struct User {
+    name: string,
+    age: int
+}
+
+@macro log_exec {
+    // macro implementation...
+}
+
+@log_exec
+fn do_work() {
+    println("Working...");
 }
 ```
 

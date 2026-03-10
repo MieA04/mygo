@@ -1,0 +1,17 @@
+package main
+
+@Derive(Json)
+struct User {
+    name: string,
+    age: int
+}
+
+@Init
+fn setup() {
+    // println("Setup called")
+    // Assuming println is not built-in, use raw Go for now or just empty
+}
+
+fn main() {
+    let u = User{name: "Alice", age: 30};
+}

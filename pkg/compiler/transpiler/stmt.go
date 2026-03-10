@@ -81,7 +81,7 @@ func (v *MyGoTranspiler) VisitIteratorForStmt(ctx *ast.IteratorForStmtContext) i
 		baseExprStr = strings.TrimSuffix(baseExprStr, ".item()")
 	}
 
-	isNative := strings.HasPrefix(colType, "[]") || colType == "string" || strings.HasPrefix(colType, "map")
+	isNative := strings.HasPrefix(colType, "[]") || strings.HasSuffix(colType, "[]") || colType == "string" || strings.HasPrefix(colType, "map")
 	if colType == "unknown" {
 		isNative = true
 	}
@@ -133,14 +133,58 @@ func (v *MyGoTranspiler) VisitReturnStmt(ctx *ast.ReturnStmtContext) interface{}
 
 func (v *MyGoTranspiler) VisitAssignmentStmt(ctx *ast.AssignmentStmtContext) interface{} {
 	lhs := ctx.Expr(0).Accept(v).(string)
-	rhs := ctx.Expr(1).Accept(v).(string)
+
+	// Infer LHS type to set expectation for RHS (important for array literals)
 	lhsType := types.InferExprType(ctx.Expr(0), v.CurrentScope)
+
+	oldExpected := v.expectedType
+	v.expectedType = v.toGoType(lhsType)
+	rhs := ctx.Expr(1).Accept(v).(string)
+	v.expectedType = oldExpected
+
 	rhsType := types.InferExprType(ctx.Expr(1), v.CurrentScope)
 	rhs = v.applyImplicitPromotion(rhs, rhsType, lhsType)
 	return fmt.Sprintf("%s = %s", lhs, rhs)
 }
 
 func (v *MyGoTranspiler) VisitExprStmt(ctx *ast.ExprStmtContext) interface{} {
+	// Optimization for slice mutation methods (RFC-006)
+	// Automatically generate assignment for append, insert, remove
+	if methodCall, ok := ctx.Expr().(*ast.MethodCallExprContext); ok {
+		methodName := methodCall.ID().GetText()
+		objType := types.InferExprType(methodCall.Expr(), v.CurrentScope)
+		if strings.HasSuffix(objType, "[]") || strings.HasPrefix(objType, "[]") {
+			switch methodName {
+			case "append", "insert", "remove_range":
+				// Generate: obj = obj.method(...)
+				exprCode := ctx.Expr().Accept(v).(string)
+				objCode := methodCall.Expr().Accept(v).(string)
+				return fmt.Sprintf("%s = %s", objCode, exprCode)
+			}
+		}
+	} else if funcCall, ok := ctx.Expr().(*ast.FuncCallExprContext); ok {
+		// Optimization for slice mutation methods (RFC-006) when parsed as FuncCallExpr (e.g. c.insert(...))
+		callee := funcCall.QualifiedName().GetText()
+		parts := strings.Split(callee, ".")
+		if len(parts) > 1 {
+			methodName := parts[len(parts)-1]
+			objName := strings.Join(parts[:len(parts)-1], ".")
+
+			// Resolve symbol to check if it is a slice
+			sym := v.CurrentScope.ResolveQualified(objName)
+			if sym == nil {
+				sym = v.CurrentScope.Resolve(objName)
+			}
+
+			if sym != nil && sym.Kind == symbols.KindVar && (strings.HasSuffix(sym.Type, "[]") || strings.HasPrefix(sym.Type, "[]")) {
+				switch methodName {
+				case "append", "insert", "remove_range":
+					exprCode := ctx.Expr().Accept(v).(string)
+					return fmt.Sprintf("%s = %s", objName, exprCode)
+				}
+			}
+		}
+	}
 	return ctx.Expr().Accept(v)
 }
 

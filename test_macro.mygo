@@ -1,0 +1,19 @@
+package main
+
+@macro MyLog {
+    let name = meta.name;
+    let msg = "\"Executing " + name + "\"";
+    return #quote {
+        let _log = msg;
+        #inner_call();
+    };
+}
+
+@MyLog
+fn myFunc() {
+    let x = 1;
+}
+
+fn main() {
+    myFunc();
+}

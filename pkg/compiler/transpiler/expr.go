@@ -212,6 +212,17 @@ func (v *MyGoTranspiler) VisitStructLiteralExpr(ctx *ast.StructLiteralExprContex
 
 func (v *MyGoTranspiler) VisitFuncCallExpr(ctx *ast.FuncCallExprContext) interface{} {
 	callee := ctx.QualifiedName().GetText()
+	// fmt.Fprintf(os.Stderr, "DEBUG: VisitFuncCallExpr callee=%s\n", callee)
+
+	// Check if it's a macro invocation
+	if sym := v.CurrentScope.Resolve(callee); sym != nil && sym.Kind == symbols.KindAnnotation {
+		fmt.Fprintf(os.Stderr, "DEBUG: Executing macro %s\n", callee)
+		// Execute macro without target node (standalone invocation)
+		macroResult := v.executeMacro(callee, nil)
+		fmt.Fprintf(os.Stderr, "DEBUG: Macro result: %s\n", macroResult)
+		return v.transpileMacroResult(macroResult)
+	}
+
 	if callee == "print" {
 		callee = "fmt.Println"
 	}
@@ -246,9 +257,42 @@ func (v *MyGoTranspiler) VisitFuncCallExpr(ctx *ast.FuncCallExprContext) interfa
 		return fmt.Sprintf("make(%s)", chanType)
 	}
 
+	// Slice creation: slice<T>(len, cap) or slice<T>(len)
+	if callee == "slice" {
+		typeArgsStr := types.ParseTypeArgs(ctx.TypeArgs())
+		elemType := "interface{}"
+		if typeArgsStr != "" {
+			if strings.HasPrefix(typeArgsStr, "<") && strings.HasSuffix(typeArgsStr, ">") {
+				elemType = typeArgsStr[1 : len(typeArgsStr)-1]
+			} else if strings.HasPrefix(typeArgsStr, "[") && strings.HasSuffix(typeArgsStr, "]") {
+				elemType = typeArgsStr[1 : len(typeArgsStr)-1]
+			}
+		}
+
+		// We need to resolve the element type to Go type
+		elemType = v.toGoType(elemType)
+
+		sliceType := "[]" + elemType
+
+		var args []string
+		if ctx.ExprList() != nil {
+			for _, eCtx := range ctx.ExprList().(*ast.ExprListContext).AllExpr() {
+				args = append(args, eCtx.Accept(v).(string))
+			}
+		}
+
+		if len(args) == 1 {
+			return fmt.Sprintf("make(%s, %s)", sliceType, args[0])
+		} else if len(args) == 2 {
+			return fmt.Sprintf("make(%s, %s, %s)", sliceType, args[0], args[1])
+		}
+		// Default to len 0 if no args provided
+		return fmt.Sprintf("make(%s, 0)", sliceType)
+	}
+
 	// Check if it's an enum variant constructor: Enum.Variant
 	parts := strings.Split(callee, ".")
-	// Check if it is a channel method call: ch.write(v) or ch.read() or ch.close()
+	// Check if it is a channel method call or slice method call
 	if len(parts) > 1 {
 		objName := strings.Join(parts[:len(parts)-1], ".")
 		method := parts[len(parts)-1]
@@ -270,7 +314,20 @@ func (v *MyGoTranspiler) VisitFuncCallExpr(ctx *ast.FuncCallExprContext) interfa
 				} else if method == "close" {
 					return fmt.Sprintf("close(%s)", objName)
 				}
+			} else if strings.HasSuffix(sym.Type, "[]") || strings.HasPrefix(sym.Type, "[]") {
+				// Slice method handling
+				var sliceArgs []string
+				if ctx.ExprList() != nil {
+					for _, eCtx := range ctx.ExprList().(*ast.ExprListContext).AllExpr() {
+						sliceArgs = append(sliceArgs, eCtx.Accept(v).(string))
+					}
+				}
+				if res, ok := v.transpileSliceMethod(objName, sym.Type, method, sliceArgs); ok {
+					return res
+				}
 			}
+		} else {
+			// Failed to resolve symbol
 		}
 	}
 
@@ -350,8 +407,22 @@ func (v *MyGoTranspiler) VisitMethodCallExpr(ctx *ast.MethodCallExprContext) int
 	method := ctx.ID().GetText()
 	typeArgs := types.ParseTypeArgs(ctx.TypeArgs())
 
-	// Channel operations
+	// Slice operations (RFC-006)
 	objType := types.InferExprType(ctx.Expr(), v.CurrentScope)
+	fmt.Fprintf(os.Stderr, "DEBUG: VisitMethodCallExpr obj=%s method=%s objType=%s\n", obj, method, objType)
+
+	var sliceArgs []string
+	if ctx.ExprList() != nil {
+		for _, eCtx := range ctx.ExprList().(*ast.ExprListContext).AllExpr() {
+			sliceArgs = append(sliceArgs, eCtx.Accept(v).(string))
+		}
+	}
+
+	if res, ok := v.transpileSliceMethod(obj, objType, method, sliceArgs); ok {
+		return res
+	}
+
+	// Channel operations
 	if types.IsChannelType(objType) {
 		if method == "read" {
 			return fmt.Sprintf("(<-%s)", obj)
@@ -621,13 +692,27 @@ func (v *MyGoTranspiler) VisitCastExpr(ctx *ast.CastExprContext) interface{} {
 
 func (v *MyGoTranspiler) VisitArrayLiteralExpr(ctx *ast.ArrayLiteralExprContext) interface{} {
 	if ctx.ExprList() == nil {
-		return "{}"
+		if v.expectedType != "" {
+			return v.expectedType + "{}"
+		}
+		// Empty array literal with no context? defaulting to []interface{}
+		return "[]interface{}{}"
 	}
 	var elems []string
 	for _, eCtx := range ctx.ExprList().(*ast.ExprListContext).AllExpr() {
 		elems = append(elems, eCtx.Accept(v).(string))
 	}
-	return "{" + strings.Join(elems, ", ") + "}"
+
+	content := "{" + strings.Join(elems, ", ") + "}"
+
+	if v.expectedType != "" {
+		return v.expectedType + content
+	}
+
+	// Fallback: infer from elements
+	myGoType := types.SniffArrayType(ctx, v.CurrentScope)
+	goType := v.toGoType(myGoType)
+	return goType + content
 }
 
 func (v *MyGoTranspiler) VisitArrayIndexExpr(ctx *ast.ArrayIndexExprContext) interface{} {
@@ -691,4 +776,86 @@ func (v *MyGoTranspiler) VisitLambdaExpr(ctx *ast.LambdaExprContext) interface{}
 	blockStr := ctx.Block().Accept(v).(string)
 	v.popScope()
 	return fmt.Sprintf("func(%s)%s %s", strings.Join(params, ", "), returnTypeStr, blockStr)
+}
+
+func (v *MyGoTranspiler) transpileSliceMethod(obj, objType, method string, sliceArgs []string) (string, bool) {
+	var elemType string
+	if strings.HasSuffix(objType, "[]") {
+		elemType = strings.TrimSuffix(objType, "[]")
+	} else if strings.HasPrefix(objType, "[]") {
+		elemType = strings.TrimPrefix(objType, "[]")
+	} else {
+		return "", false
+	}
+
+	switch method {
+	case "len":
+		return fmt.Sprintf("len(%s)", obj), true
+	case "cap":
+		return fmt.Sprintf("cap(%s)", obj), true
+	case "is_empty":
+		return fmt.Sprintf("(len(%s) == 0)", obj), true
+	case "clear":
+		// clear() empties the slice (len=0).
+		// Use IIFE to mutate in place.
+		goElemType := v.toGoType(elemType)
+		goSliceType := "[]" + goElemType
+		return fmt.Sprintf("func(s *%s) { *s = (*s)[:0] }(&%s)", goSliceType, obj), true
+	case "append":
+		return fmt.Sprintf("append(%s, %s)", obj, strings.Join(sliceArgs, ", ")), true
+	case "insert":
+		v.AddImport("slices")
+		if len(sliceArgs) >= 2 {
+			return fmt.Sprintf("slices.Insert(%s, %s, %s)", obj, sliceArgs[0], strings.Join(sliceArgs[1:], ", ")), true
+		}
+	case "remove":
+		v.AddImport("slices")
+		if len(sliceArgs) >= 1 {
+			// remove(i) removes and returns the element.
+			// We use an IIFE to mutate the slice in place and return the element.
+			// This requires the slice object to be addressable.
+			goElemType := v.toGoType(elemType)
+			goSliceType := "[]" + goElemType
+			idx := sliceArgs[0]
+			return fmt.Sprintf("func(s *%s, i int) %s { v := (*s)[i]; *s = slices.Delete(*s, i, i+1); return v }(&%s, %s)", goSliceType, goElemType, obj, idx), true
+		}
+	case "pop":
+		v.AddImport("slices")
+		// pop() removes and returns the last element.
+		// We use an IIFE to mutate the slice in place and return the element.
+		goElemType := v.toGoType(elemType)
+		goSliceType := "[]" + goElemType
+		return fmt.Sprintf("func(s *%s) %s { i := len(*s)-1; v := (*s)[i]; *s = (*s)[:i]; return v }(&%s)", goSliceType, goElemType, obj), true
+	case "remove_range":
+		v.AddImport("slices")
+		if len(sliceArgs) >= 2 {
+			return fmt.Sprintf("slices.Delete(%s, %s, %s)", obj, sliceArgs[0], sliceArgs[1]), true
+		}
+	case "reverse":
+		v.AddImport("slices")
+		return fmt.Sprintf("slices.Reverse(%s)", obj), true
+	case "sort":
+		v.AddImport("slices")
+		return fmt.Sprintf("slices.Sort(%s)", obj), true
+	case "contains":
+		v.AddImport("slices")
+		if len(sliceArgs) >= 1 {
+			return fmt.Sprintf("slices.Contains(%s, %s)", obj, sliceArgs[0]), true
+		}
+	case "index_of":
+		v.AddImport("slices")
+		if len(sliceArgs) >= 1 {
+			return fmt.Sprintf("slices.Index(%s, %s)", obj, sliceArgs[0]), true
+		}
+	case "max":
+		v.AddImport("slices")
+		return fmt.Sprintf("slices.Max(%s)", obj), true
+	case "min":
+		v.AddImport("slices")
+		return fmt.Sprintf("slices.Min(%s)", obj), true
+	case "clone":
+		v.AddImport("slices")
+		return fmt.Sprintf("slices.Clone(%s)", obj), true
+	}
+	return "", false
 }

@@ -5,13 +5,19 @@ import (
 )
 
 type Scope struct {
-	Name    string
-	Symbols map[string]*Symbol
-	Parent  *Scope
+	Name            string
+	Symbols         map[string]*Symbol
+	AnnotationIndex map[string][]*Symbol
+	Parent          *Scope
 }
 
 func NewScope(name string, parent *Scope) *Scope {
-	return &Scope{Name: name, Symbols: make(map[string]*Symbol), Parent: parent}
+	return &Scope{
+		Name:            name,
+		Symbols:         make(map[string]*Symbol),
+		AnnotationIndex: make(map[string][]*Symbol),
+		Parent:          parent,
+	}
 }
 
 func (s *Scope) Define(mygoName, goName string, kind SymbolKind, typeStr string) *Symbol {
@@ -38,6 +44,36 @@ func (s *Scope) DefineWithMeta(mygoName, goName string, kind SymbolKind, typeStr
 	}
 	s.Symbols[mygoName] = sym
 	return sym
+}
+
+// AddAnnotation indexes a symbol by an annotation name
+func (s *Scope) AddAnnotation(annName string, sym *Symbol) {
+	if s.AnnotationIndex == nil {
+		s.AnnotationIndex = make(map[string][]*Symbol)
+	}
+	s.AnnotationIndex[annName] = append(s.AnnotationIndex[annName], sym)
+}
+
+// GetAnnotatedSymbols returns symbols annotated with annName in this scope only
+func (s *Scope) GetAnnotatedSymbols(annName string) []*Symbol {
+	return s.AnnotationIndex[annName]
+}
+
+// CollectAnnotatedSymbols returns symbols annotated with annName in this scope and all parent scopes
+func (s *Scope) CollectAnnotatedSymbols(annName string) []*Symbol {
+	var results []*Symbol
+
+	// Add from current scope
+	if syms, ok := s.AnnotationIndex[annName]; ok {
+		results = append(results, syms...)
+	}
+
+	// Add from parent scope
+	if s.Parent != nil {
+		results = append(results, s.Parent.CollectAnnotatedSymbols(annName)...)
+	}
+
+	return results
 }
 
 // DefineSymbol adds a pre-constructed symbol to the scope

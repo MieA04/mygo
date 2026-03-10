@@ -106,12 +106,23 @@ func (l *PackageLoader) LoadPackage(importPath string) (*Package, error) {
 						// For now, just overwrite
 						pkg.Name = pkgDecl.ID().GetText()
 					}
-					if importStmt, ok := child.(*ast.ImportStmtContext); ok {
-						// TODO: Update logic after regenerating parser for new import syntax
-						// New logic should iterate over import specs and handle aliases
-						rawStr := importStmt.STRING().GetText()
-						importPath := strings.Trim(rawStr, "\"")
-						file.Imports = append(file.Imports, core.ImportSpec{Path: importPath})
+					if importStmt, ok := child.(ast.IImportStmtContext); ok {
+						// Extract imports from block or single import
+						if blockCtx, ok := importStmt.(*ast.BlockImportContext); ok {
+							for _, spec := range blockCtx.AllImportSpec() {
+								if specCtx, ok := spec.(*ast.ImportSpecContext); ok {
+									rawStr := specCtx.STRING().GetText()
+									importPath := strings.Trim(rawStr, "\"")
+									file.Imports = append(file.Imports, core.ImportSpec{Path: importPath})
+								}
+							}
+						} else if singleCtx, ok := importStmt.(*ast.SingleImportContext); ok {
+							if specCtx, ok := singleCtx.ImportSpec().(*ast.ImportSpecContext); ok {
+								rawStr := specCtx.STRING().GetText()
+								importPath := strings.Trim(rawStr, "\"")
+								file.Imports = append(file.Imports, core.ImportSpec{Path: importPath})
+							}
+						}
 					}
 				}
 

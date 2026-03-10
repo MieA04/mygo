@@ -191,7 +191,7 @@ MyGo 支持标准的跳转控制语句。
 - **return**: 从函数返回结果。
 
 ```mygo
-fn findEven(numbers: [int]) {
+fn findEven(numbers: int[]) {
     for (n : numbers) {
         if n % 2 != 0 {
             continue; // 跳过奇数

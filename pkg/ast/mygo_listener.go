@@ -13,11 +13,23 @@ type MyGoListener interface {
 	// EnterPackageDecl is called when entering the packageDecl production.
 	EnterPackageDecl(c *PackageDeclContext)
 
-	// EnterImportStmt is called when entering the importStmt production.
-	EnterImportStmt(c *ImportStmtContext)
+	// EnterBlockImport is called when entering the BlockImport production.
+	EnterBlockImport(c *BlockImportContext)
+
+	// EnterSingleImport is called when entering the SingleImport production.
+	EnterSingleImport(c *SingleImportContext)
+
+	// EnterImportSpec is called when entering the importSpec production.
+	EnterImportSpec(c *ImportSpecContext)
 
 	// EnterStatement is called when entering the statement production.
 	EnterStatement(c *StatementContext)
+
+	// EnterAnnotationDecl is called when entering the annotationDecl production.
+	EnterAnnotationDecl(c *AnnotationDeclContext)
+
+	// EnterAnnotationTarget is called when entering the annotationTarget production.
+	EnterAnnotationTarget(c *AnnotationTargetContext)
 
 	// EnterSpawnStmt is called when entering the spawnStmt production.
 	EnterSpawnStmt(c *SpawnStmtContext)
@@ -66,6 +78,9 @@ type MyGoListener interface {
 
 	// EnterGenericConstraint is called when entering the genericConstraint production.
 	EnterGenericConstraint(c *GenericConstraintContext)
+
+	// EnterAnnotationUsage is called when entering the annotationUsage production.
+	EnterAnnotationUsage(c *AnnotationUsageContext)
 
 	// EnterStructDecl is called when entering the structDecl production.
 	EnterStructDecl(c *StructDeclContext)
@@ -256,6 +271,12 @@ type MyGoListener interface {
 	// EnterAddrOfExpr is called when entering the AddrOfExpr production.
 	EnterAddrOfExpr(c *AddrOfExprContext)
 
+	// EnterQuoteExpr is called when entering the QuoteExpr production.
+	EnterQuoteExpr(c *QuoteExprContext)
+
+	// EnterInnerCallExpr is called when entering the InnerCallExpr production.
+	EnterInnerCallExpr(c *InnerCallExprContext)
+
 	// EnterIntExpr is called when entering the IntExpr production.
 	EnterIntExpr(c *IntExprContext)
 
@@ -277,11 +298,23 @@ type MyGoListener interface {
 	// ExitPackageDecl is called when exiting the packageDecl production.
 	ExitPackageDecl(c *PackageDeclContext)
 
-	// ExitImportStmt is called when exiting the importStmt production.
-	ExitImportStmt(c *ImportStmtContext)
+	// ExitBlockImport is called when exiting the BlockImport production.
+	ExitBlockImport(c *BlockImportContext)
+
+	// ExitSingleImport is called when exiting the SingleImport production.
+	ExitSingleImport(c *SingleImportContext)
+
+	// ExitImportSpec is called when exiting the importSpec production.
+	ExitImportSpec(c *ImportSpecContext)
 
 	// ExitStatement is called when exiting the statement production.
 	ExitStatement(c *StatementContext)
+
+	// ExitAnnotationDecl is called when exiting the annotationDecl production.
+	ExitAnnotationDecl(c *AnnotationDeclContext)
+
+	// ExitAnnotationTarget is called when exiting the annotationTarget production.
+	ExitAnnotationTarget(c *AnnotationTargetContext)
 
 	// ExitSpawnStmt is called when exiting the spawnStmt production.
 	ExitSpawnStmt(c *SpawnStmtContext)
@@ -330,6 +363,9 @@ type MyGoListener interface {
 
 	// ExitGenericConstraint is called when exiting the genericConstraint production.
 	ExitGenericConstraint(c *GenericConstraintContext)
+
+	// ExitAnnotationUsage is called when exiting the annotationUsage production.
+	ExitAnnotationUsage(c *AnnotationUsageContext)
 
 	// ExitStructDecl is called when exiting the structDecl production.
 	ExitStructDecl(c *StructDeclContext)
@@ -519,6 +555,12 @@ type MyGoListener interface {
 
 	// ExitAddrOfExpr is called when exiting the AddrOfExpr production.
 	ExitAddrOfExpr(c *AddrOfExprContext)
+
+	// ExitQuoteExpr is called when exiting the QuoteExpr production.
+	ExitQuoteExpr(c *QuoteExprContext)
+
+	// ExitInnerCallExpr is called when exiting the InnerCallExpr production.
+	ExitInnerCallExpr(c *InnerCallExprContext)
 
 	// ExitIntExpr is called when exiting the IntExpr production.
 	ExitIntExpr(c *IntExprContext)

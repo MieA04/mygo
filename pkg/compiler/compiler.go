@@ -18,6 +18,9 @@ func TranspilePackage(pkg *Package, loader *PackageLoader, moduleName string, em
 
 	for _, f := range pkg.Files {
 		collector.SetCompilationUnit(pkg.Name, f.Path)
+		for _, decl := range f.AST.AllAnnotationDecl() {
+			decl.Accept(collector)
+		}
 		for _, stmt := range f.AST.AllStatement() {
 			stmt.Accept(collector)
 		}
@@ -44,10 +47,12 @@ func TranspilePackage(pkg *Package, loader *PackageLoader, moduleName string, em
 	for _, f := range pkg.Files {
 		analyzer.SetCompilationUnit(pkg.Name, f.Path)
 		// Process imports
-		for _, child := range f.AST.GetChildren() {
-			if importStmt, ok := child.(*ast.ImportStmtContext); ok {
-				analyzer.VisitImportStmt(importStmt)
-			}
+		for _, importStmt := range f.AST.AllImportStmt() {
+			importStmt.Accept(analyzer)
+		}
+
+		for _, decl := range f.AST.AllAnnotationDecl() {
+			decl.Accept(analyzer)
 		}
 
 		for _, stmt := range f.AST.AllStatement() {
@@ -78,7 +83,12 @@ func _mygo_must[T any](v T, err error) T {
 	for _, f := range pkg.Files {
 		myTranspiler.SetCurrentFile(f.Path)
 		for _, stmt := range f.AST.AllStatement() {
-			res := stmt.Accept(myTranspiler)
+			// Explicitly cast to concrete type to bypass missing Accept method issue
+			concreteStmt, ok := stmt.(*ast.StatementContext)
+			if !ok {
+				continue
+			}
+			res := myTranspiler.VisitStatement(concreteStmt)
 			if res != nil {
 				body.WriteString(res.(string) + "\n")
 			}
@@ -116,6 +126,11 @@ func _mygo_ternary[T any](cond bool, a, b T) T {
 		uniqueImports[ImportKey{Path: "fmt"}] = struct{}{}
 	}
 
+	// Add auto-imports from transpiler (e.g. slices)
+	for pkg := range myTranspiler.UsedPackages {
+		uniqueImports[ImportKey{Path: pkg}] = struct{}{}
+	}
+
 	// Add user imports
 	// We need to map MyGo imports to Go imports
 	for _, f := range pkg.Files {
@@ -151,6 +166,15 @@ func _mygo_ternary[T any](cond bool, a, b T) T {
 			}
 		}
 		finalGoCode.WriteString(")\n\n")
+	}
+
+	// RFC-007: Generate init()
+	if len(myTranspiler.InitFunctions) > 0 {
+		body.WriteString("\nfunc init() {\n")
+		for _, fn := range myTranspiler.InitFunctions {
+			body.WriteString(fmt.Sprintf("\t%s()\n", fn))
+		}
+		body.WriteString("}\n")
 	}
 
 	finalGoCode.WriteString(body.String())

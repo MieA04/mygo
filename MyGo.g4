@@ -1,7 +1,7 @@
 grammar MyGo;
 
 // Parser Rules
-program: packageDecl? importStmt* statement+ EOF;
+program: packageDecl? importStmt* (statement | annotationDecl)+ EOF;
 
 packageDecl: 'package' ID ';'? ;
 
@@ -35,6 +35,16 @@ statement
     | selectStmt
     ;
 
+annotationDecl: MACRO ID block ;
+
+annotationTarget
+    : ID
+    | FN
+    | STRUCT
+    | LET // varDecl starts with 'let'
+    | CONST
+    ;
+
 spawnStmt: 'spawn' (block | exprStmt) ;
 
 selectStmt: 'select' '{' selectBranch (',' selectBranch)* ','? '}' ;
@@ -60,13 +70,15 @@ typeArgs: '<' typeList '>' ;
 whereClause: 'where' genericConstraint (',' genericConstraint)* ;
 genericConstraint: ID ':' typeType ('+' typeType)* ;
 
-structDecl: whereClause? modifier? 'struct' ID typeParams? '{' (structField (',' structField)* ','?)? '}' ;
+annotationUsage: '@' ID ('(' exprList? ')')? ;
+
+structDecl: annotationUsage* whereClause? modifier? 'struct' ID typeParams? '{' (structField (',' structField)* ','?)? '}' ;
 structField: ID ':' typeType ;
 
 enumDecl: whereClause? modifier? 'enum' ID typeParams? '{' enumVariant (',' enumVariant)* ','? '}' ;
 enumVariant: ID ('(' typeList ')')? ;
 
-fnDecl: whereClause? modifier? 'fn' ID typeParams? '(' paramList? ')' (':' typeType)? block ;
+fnDecl: annotationUsage* whereClause? modifier? 'fn' ID typeParams? '(' paramList? ')' (':' typeType)? block ;
 paramList: param (',' param)* ;
 param: ID ':' typeType ;
 
@@ -110,13 +122,13 @@ breakStmt: 'break' ';' ;
 continueStmt: 'continue' ';' ;
 
 varDecl
-    : modifier? 'let' ID (':' typeType)? ('=' expr)? ';'             # SingleLetDecl
-    | modifier? 'let' '(' ID (',' ID)* ')' '=' expr ';'              # TupleLetDecl
-    | modifier? 'const' ID (':' typeType)? '=' expr ';'              # ConstDecl
+    : annotationUsage* modifier? 'let' ID (':' typeType)? ('=' expr)? ';'             # SingleLetDecl
+    | annotationUsage* modifier? 'let' '(' ID (',' ID)* ')' '=' expr ';'              # TupleLetDecl
+    | annotationUsage* modifier? 'const' ID (':' typeType)? '=' expr ';'              # ConstDecl
     ;
 
 typeList: typeType (',' typeType)* ;
-typeType: '*' typeType | qualifiedName typeArgs? ('[' INT? ']')? | '(' typeList ')' | 'fn' '(' typeList? ')' (':' typeType)? ;
+typeType: '*' typeType | qualifiedName typeArgs? ('[' INT? ']')* | '(' typeList ')' | 'fn' '(' typeList? ')' (':' typeType)? ;
 
 qualifiedName: ID ('.' ID)* ;
 
@@ -152,6 +164,8 @@ expr
     | 'this'                                                # ThisExpr
     | 'nil'                                                 # NilExpr
     | qualifiedName                                         # IdentifierExpr
+    | '#quote' block                                        # QuoteExpr
+    | '#inner_call' '(' exprList? ')'                       # InnerCallExpr
     | INT                                                   # IntExpr
     | STRING                                                # StringExpr
     | FLOAT                                                 # FloatExpr
@@ -159,6 +173,8 @@ expr
 
 // Lexer Rules
 // Keywords
+MACRO: '@macro';
+ANNOTATION: 'annotation';
 PACKAGE: 'package';
 IMPORT: 'import';
 STRUCT: 'struct';
@@ -192,13 +208,14 @@ PKG: 'pkg';
 TO: 'to';
 THIS: 'this';
 NIL: 'nil';
+TARGET: 'target';
 
 TRY_UNWRAP : '?!' ;
 PANIC_UNWRAP: '?!!' ;
 ID  : [a-zA-Z_][a-zA-Z_0-9]* ;
 INT : [0-9]+ ;
 FLOAT: [0-9]+ '.' [0-9]+ ;
-STRING: '"' ~["]* '"' ;
+STRING: '"' ( '\\' . | ~["\\] )* '"' ;
 LINE_COMMENT: '//' ~[\r\n]* -> skip ;
 BLOCK_COMMENT: '/*' .*? '*/' -> skip ;
 WS  : [ \t\r\n]+ -> skip ;

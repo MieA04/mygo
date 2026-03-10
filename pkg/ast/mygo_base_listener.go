@@ -32,17 +32,41 @@ func (s *BaseMyGoListener) EnterPackageDecl(ctx *PackageDeclContext) {}
 // ExitPackageDecl is called when production packageDecl is exited.
 func (s *BaseMyGoListener) ExitPackageDecl(ctx *PackageDeclContext) {}
 
-// EnterImportStmt is called when production importStmt is entered.
-func (s *BaseMyGoListener) EnterImportStmt(ctx *ImportStmtContext) {}
+// EnterBlockImport is called when production BlockImport is entered.
+func (s *BaseMyGoListener) EnterBlockImport(ctx *BlockImportContext) {}
 
-// ExitImportStmt is called when production importStmt is exited.
-func (s *BaseMyGoListener) ExitImportStmt(ctx *ImportStmtContext) {}
+// ExitBlockImport is called when production BlockImport is exited.
+func (s *BaseMyGoListener) ExitBlockImport(ctx *BlockImportContext) {}
+
+// EnterSingleImport is called when production SingleImport is entered.
+func (s *BaseMyGoListener) EnterSingleImport(ctx *SingleImportContext) {}
+
+// ExitSingleImport is called when production SingleImport is exited.
+func (s *BaseMyGoListener) ExitSingleImport(ctx *SingleImportContext) {}
+
+// EnterImportSpec is called when production importSpec is entered.
+func (s *BaseMyGoListener) EnterImportSpec(ctx *ImportSpecContext) {}
+
+// ExitImportSpec is called when production importSpec is exited.
+func (s *BaseMyGoListener) ExitImportSpec(ctx *ImportSpecContext) {}
 
 // EnterStatement is called when production statement is entered.
 func (s *BaseMyGoListener) EnterStatement(ctx *StatementContext) {}
 
 // ExitStatement is called when production statement is exited.
 func (s *BaseMyGoListener) ExitStatement(ctx *StatementContext) {}
+
+// EnterAnnotationDecl is called when production annotationDecl is entered.
+func (s *BaseMyGoListener) EnterAnnotationDecl(ctx *AnnotationDeclContext) {}
+
+// ExitAnnotationDecl is called when production annotationDecl is exited.
+func (s *BaseMyGoListener) ExitAnnotationDecl(ctx *AnnotationDeclContext) {}
+
+// EnterAnnotationTarget is called when production annotationTarget is entered.
+func (s *BaseMyGoListener) EnterAnnotationTarget(ctx *AnnotationTargetContext) {}
+
+// ExitAnnotationTarget is called when production annotationTarget is exited.
+func (s *BaseMyGoListener) ExitAnnotationTarget(ctx *AnnotationTargetContext) {}
 
 // EnterSpawnStmt is called when production spawnStmt is entered.
 func (s *BaseMyGoListener) EnterSpawnStmt(ctx *SpawnStmtContext) {}
@@ -139,6 +163,12 @@ func (s *BaseMyGoListener) EnterGenericConstraint(ctx *GenericConstraintContext)
 
 // ExitGenericConstraint is called when production genericConstraint is exited.
 func (s *BaseMyGoListener) ExitGenericConstraint(ctx *GenericConstraintContext) {}
+
+// EnterAnnotationUsage is called when production annotationUsage is entered.
+func (s *BaseMyGoListener) EnterAnnotationUsage(ctx *AnnotationUsageContext) {}
+
+// ExitAnnotationUsage is called when production annotationUsage is exited.
+func (s *BaseMyGoListener) ExitAnnotationUsage(ctx *AnnotationUsageContext) {}
 
 // EnterStructDecl is called when production structDecl is entered.
 func (s *BaseMyGoListener) EnterStructDecl(ctx *StructDeclContext) {}
@@ -517,6 +547,18 @@ func (s *BaseMyGoListener) EnterAddrOfExpr(ctx *AddrOfExprContext) {}
 
 // ExitAddrOfExpr is called when production AddrOfExpr is exited.
 func (s *BaseMyGoListener) ExitAddrOfExpr(ctx *AddrOfExprContext) {}
+
+// EnterQuoteExpr is called when production QuoteExpr is entered.
+func (s *BaseMyGoListener) EnterQuoteExpr(ctx *QuoteExprContext) {}
+
+// ExitQuoteExpr is called when production QuoteExpr is exited.
+func (s *BaseMyGoListener) ExitQuoteExpr(ctx *QuoteExprContext) {}
+
+// EnterInnerCallExpr is called when production InnerCallExpr is entered.
+func (s *BaseMyGoListener) EnterInnerCallExpr(ctx *InnerCallExprContext) {}
+
+// ExitInnerCallExpr is called when production InnerCallExpr is exited.
+func (s *BaseMyGoListener) ExitInnerCallExpr(ctx *InnerCallExprContext) {}
 
 // EnterIntExpr is called when production IntExpr is entered.
 func (s *BaseMyGoListener) EnterIntExpr(ctx *IntExprContext) {}

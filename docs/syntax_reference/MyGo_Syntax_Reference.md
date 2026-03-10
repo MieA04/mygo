@@ -47,6 +47,7 @@ MyGo 支持两种风格的注释：
 | `break`, `continue` | 循环跳转 |
 | `is`, `!is` | 类型检查 |
 | `to` | 类型转换 |
+| `macro` | 宏定义 |
 | `this` | 当前实例引用 |
 | `nil` | 空指针/空值 |
 | `ban`, `flip`, `repeat` | Trait 冲突解决指令 |
@@ -167,6 +168,46 @@ trait bind(p: Point) {
     fn distance(): float {
         // ...
     }
+}
+```
+
+### 3.6 注解 (`@Annotation`)
+
+注解用于为声明添加元数据。
+
+```mygo
+// 标记结构体自动生成 JSON 序列化方法
+@Derive(Json)
+struct User {
+    id: int,
+    name: string
+}
+
+// 标记初始化函数
+@Init
+fn init_system() {
+    // ...
+}
+```
+
+### 3.7 宏定义 (`@macro`)
+
+宏允许在编译期操作 AST 并生成代码。
+
+```mygo
+@macro log_exec {
+    let name = target.name;
+    let body = target.body;
+    return #quote {
+        println("Enter: " + name);
+        body;
+        println("Exit: " + name);
+    };
+}
+
+@log_exec
+fn my_func() {
+    // ...
 }
 ```
 

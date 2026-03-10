@@ -13,11 +13,23 @@ type MyGoVisitor interface {
 	// Visit a parse tree produced by MyGoParser#packageDecl.
 	VisitPackageDecl(ctx *PackageDeclContext) interface{}
 
-	// Visit a parse tree produced by MyGoParser#importStmt.
-	VisitImportStmt(ctx *ImportStmtContext) interface{}
+	// Visit a parse tree produced by MyGoParser#BlockImport.
+	VisitBlockImport(ctx *BlockImportContext) interface{}
+
+	// Visit a parse tree produced by MyGoParser#SingleImport.
+	VisitSingleImport(ctx *SingleImportContext) interface{}
+
+	// Visit a parse tree produced by MyGoParser#importSpec.
+	VisitImportSpec(ctx *ImportSpecContext) interface{}
 
 	// Visit a parse tree produced by MyGoParser#statement.
 	VisitStatement(ctx *StatementContext) interface{}
+
+	// Visit a parse tree produced by MyGoParser#annotationDecl.
+	VisitAnnotationDecl(ctx *AnnotationDeclContext) interface{}
+
+	// Visit a parse tree produced by MyGoParser#annotationTarget.
+	VisitAnnotationTarget(ctx *AnnotationTargetContext) interface{}
 
 	// Visit a parse tree produced by MyGoParser#spawnStmt.
 	VisitSpawnStmt(ctx *SpawnStmtContext) interface{}
@@ -66,6 +78,9 @@ type MyGoVisitor interface {
 
 	// Visit a parse tree produced by MyGoParser#genericConstraint.
 	VisitGenericConstraint(ctx *GenericConstraintContext) interface{}
+
+	// Visit a parse tree produced by MyGoParser#annotationUsage.
+	VisitAnnotationUsage(ctx *AnnotationUsageContext) interface{}
 
 	// Visit a parse tree produced by MyGoParser#structDecl.
 	VisitStructDecl(ctx *StructDeclContext) interface{}
@@ -255,6 +270,12 @@ type MyGoVisitor interface {
 
 	// Visit a parse tree produced by MyGoParser#AddrOfExpr.
 	VisitAddrOfExpr(ctx *AddrOfExprContext) interface{}
+
+	// Visit a parse tree produced by MyGoParser#QuoteExpr.
+	VisitQuoteExpr(ctx *QuoteExprContext) interface{}
+
+	// Visit a parse tree produced by MyGoParser#InnerCallExpr.
+	VisitInnerCallExpr(ctx *InnerCallExprContext) interface{}
 
 	// Visit a parse tree produced by MyGoParser#IntExpr.
 	VisitIntExpr(ctx *IntExprContext) interface{}

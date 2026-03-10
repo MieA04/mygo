@@ -191,7 +191,7 @@ MyGo supports standard jump control statements.
 - **return**: Returns a result from a function.
 
 ```mygo
-fn findEven(numbers: [int]) {
+fn findEven(numbers: int[]) {
     for (n : numbers) {
         if n % 2 != 0 {
             continue; // Skip odd numbers

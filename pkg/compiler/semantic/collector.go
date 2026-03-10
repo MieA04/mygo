@@ -28,8 +28,28 @@ func (d *DeclarationCollector) SetCompilationUnit(packageName, filePath string) 
 	d.currentFile = filePath
 }
 
-func (d *DeclarationCollector) defineSymbol(mygoName, goName string, kind symbols.SymbolKind, typeStr string, modCtx ast.IModifierContext) *symbols.Symbol {
-	return d.CurrentScope.DefineWithMeta(
+func (d *DeclarationCollector) collectAnnotations(ctxs []ast.IAnnotationUsageContext) []*symbols.Annotation {
+	var anns []*symbols.Annotation
+	for _, ctx := range ctxs {
+		if c, ok := ctx.(*ast.AnnotationUsageContext); ok {
+			annName := c.ID().GetText()
+			// fmt.Printf("DEBUG: Found annotation usage: %s\n", annName)
+			ann := &symbols.Annotation{
+				Name: annName,
+			}
+			if c.ExprList() != nil {
+				for _, expr := range c.ExprList().AllExpr() {
+					ann.Args = append(ann.Args, expr.GetText())
+				}
+			}
+			anns = append(anns, ann)
+		}
+	}
+	return anns
+}
+
+func (d *DeclarationCollector) defineSymbol(mygoName, goName string, kind symbols.SymbolKind, typeStr string, modCtx ast.IModifierContext, annotations []*symbols.Annotation) *symbols.Symbol {
+	sym := d.CurrentScope.DefineWithMeta(
 		mygoName,
 		goName,
 		kind,
@@ -38,12 +58,27 @@ func (d *DeclarationCollector) defineSymbol(mygoName, goName string, kind symbol
 		d.currentPackage,
 		d.currentFile,
 	)
+	sym.Annotations = annotations
+	for _, ann := range annotations {
+		d.CurrentScope.AddAnnotation(ann.Name, sym)
+	}
+	return sym
 }
 
 func (d *DeclarationCollector) VisitProgram(ctx *ast.ProgramContext) interface{} {
 	for _, stmt := range ctx.AllStatement() {
 		stmt.Accept(d)
 	}
+	return nil
+}
+
+func (d *DeclarationCollector) VisitAnnotationDecl(ctx *ast.AnnotationDeclContext) interface{} {
+	annName := ctx.ID().GetText()
+	// Annotations are currently package-private by default as per grammar
+	sym := d.defineSymbol(annName, annName, symbols.KindAnnotation, "annotation", nil, nil)
+	sym.ASTNode = ctx
+	// Simplified rule has no target type
+	sym.Type = "fn" // Default to fn for testing
 	return nil
 }
 
@@ -59,7 +94,8 @@ func (d *DeclarationCollector) VisitStatement(ctx *ast.StatementContext) interfa
 }
 
 func (d *DeclarationCollector) VisitStructDecl(ctx *ast.StructDeclContext) interface{} {
-	sym := d.defineSymbol(ctx.ID().GetText(), types.FormatVisibility(ctx.ID().GetText(), ctx.Modifier()), symbols.KindStruct, "struct", ctx.Modifier())
+	anns := d.collectAnnotations(ctx.AllAnnotationUsage())
+	sym := d.defineSymbol(ctx.ID().GetText(), types.FormatVisibility(ctx.ID().GetText(), ctx.Modifier()), symbols.KindStruct, "struct", ctx.Modifier(), anns)
 	baseMeta := types.ExtractGenericParamMeta(ctx.TypeParams(), d.CurrentScope)
 	whereMeta := types.ExtractWhereConstraintMeta(ctx.WhereClause(), d.CurrentScope)
 	mergedMeta, issues := types.MergeGenericConstraints(baseMeta, whereMeta)
@@ -79,7 +115,7 @@ func (d *DeclarationCollector) VisitStructDecl(ctx *ast.StructDeclContext) inter
 
 func (d *DeclarationCollector) VisitEnumDecl(ctx *ast.EnumDeclContext) interface{} {
 	enumName := ctx.ID().GetText()
-	sym := d.defineSymbol(enumName, types.FormatVisibility(enumName, ctx.Modifier()), symbols.KindEnum, "enum", ctx.Modifier())
+	sym := d.defineSymbol(enumName, types.FormatVisibility(enumName, ctx.Modifier()), symbols.KindEnum, "enum", ctx.Modifier(), nil)
 	baseMeta := types.ExtractGenericParamMeta(ctx.TypeParams(), d.CurrentScope)
 	whereMeta := types.ExtractWhereConstraintMeta(ctx.WhereClause(), d.CurrentScope)
 	mergedMeta, issues := types.MergeGenericConstraints(baseMeta, whereMeta)
@@ -116,7 +152,7 @@ func (d *DeclarationCollector) VisitEnumDecl(ctx *ast.EnumDeclContext) interface
 
 func (d *DeclarationCollector) VisitPureTraitDecl(ctx *ast.PureTraitDeclContext) interface{} {
 	traitName := ctx.ID().GetText()
-	sym := d.defineSymbol(traitName, types.FormatVisibility(traitName, ctx.Modifier()), symbols.KindTrait, "trait", ctx.Modifier())
+	sym := d.defineSymbol(traitName, types.FormatVisibility(traitName, ctx.Modifier()), symbols.KindTrait, "trait", ctx.Modifier(), nil)
 	baseMeta := types.ExtractGenericParamMeta(ctx.TypeParams(), d.CurrentScope)
 	whereMeta := types.ExtractWhereConstraintMeta(ctx.WhereClause(), d.CurrentScope)
 	mergedMeta, issues := types.MergeGenericConstraints(baseMeta, whereMeta)
@@ -143,7 +179,8 @@ func (d *DeclarationCollector) VisitFnDecl(ctx *ast.FnDeclContext) interface{} {
 	if ctx.TypeType() != nil {
 		returnType = types.ResolveTypeWithScope(ctx.TypeType().GetText(), d.CurrentScope)
 	}
-	sym := d.defineSymbol(fnName, types.FormatVisibility(fnName, ctx.Modifier()), symbols.KindFunc, returnType, ctx.Modifier())
+	anns := d.collectAnnotations(ctx.AllAnnotationUsage())
+	sym := d.defineSymbol(fnName, types.FormatVisibility(fnName, ctx.Modifier()), symbols.KindFunc, returnType, ctx.Modifier(), anns)
 	baseMeta := types.ExtractGenericParamMeta(ctx.TypeParams(), d.CurrentScope)
 	whereMeta := types.ExtractWhereConstraintMeta(ctx.WhereClause(), d.CurrentScope)
 	mergedMeta, issues := types.MergeGenericConstraints(baseMeta, whereMeta)
