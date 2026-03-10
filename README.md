@@ -222,6 +222,104 @@ The compiler also attempts to encapsulate the build process (currently under dev
 ./mygo.exe build -o hello.exe .
 ```
 
+## CLI Reference
+
+The MyGo compiler (`mygo`) provides several commands for managing the development lifecycle.
+
+### Core Commands
+
+#### `run`
+Compile and run a MyGo program immediately.
+```bash
+# Run a single file
+mygo run main.mygo
+
+# Run a package in the current directory
+mygo run .
+
+# Pass arguments to the program
+mygo run main.mygo -- arg1 arg2
+```
+
+#### `build`
+Compile a MyGo program into an executable binary.
+```bash
+# Build a single file
+mygo build -o app.exe main.mygo
+
+# Build a package
+mygo build -o app.exe .
+```
+
+#### `transpile`
+Transpile MyGo source code to Go source code without compiling to binary.
+```bash
+# Transpile a single file
+mygo transpile -o main.go main.mygo
+
+# Transpile a directory
+mygo transpile .
+```
+
+### Development Tools
+
+#### `fmt`
+Format MyGo source code.
+```bash
+# Format all .mygo files in the current directory
+mygo fmt
+
+# Format specific files
+mygo fmt main.mygo utils.mygo
+```
+
+#### `vet`
+Run static analysis to catch potential errors.
+```bash
+# Check the current package
+mygo vet .
+```
+
+#### `test`
+Run tests (files ending in `_test.mygo`).
+```bash
+# Run all tests in the current directory
+mygo test
+```
+
+#### `doc`
+Show documentation for a package or symbol.
+```bash
+# Show docs for the current directory
+mygo doc .
+```
+
+### Dependency Management
+MyGo wraps Go's dependency management tools for convenience.
+
+#### `mod`
+Module maintenance (wrapper around `go mod`).
+```bash
+# Initialize a new module
+mygo mod init myproject
+
+# Tidy dependencies
+mygo mod tidy
+```
+
+#### `get`
+Add dependencies (wrapper around `go get`).
+```bash
+# Add a dependency
+mygo get github.com/gin-gonic/gin
+```
+
+#### `clean`
+Remove temporary build artifacts.
+```bash
+mygo clean
+```
+
 ## Usage Guide
 
 ### Command Line Arguments
