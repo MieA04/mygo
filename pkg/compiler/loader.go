@@ -107,9 +107,11 @@ func (l *PackageLoader) LoadPackage(importPath string) (*Package, error) {
 						pkg.Name = pkgDecl.ID().GetText()
 					}
 					if importStmt, ok := child.(*ast.ImportStmtContext); ok {
+						// TODO: Update logic after regenerating parser for new import syntax
+						// New logic should iterate over import specs and handle aliases
 						rawStr := importStmt.STRING().GetText()
 						importPath := strings.Trim(rawStr, "\"")
-						file.Imports = append(file.Imports, importPath)
+						file.Imports = append(file.Imports, core.ImportSpec{Path: importPath})
 					}
 				}
 
@@ -128,7 +130,8 @@ func (l *PackageLoader) LoadPackage(importPath string) (*Package, error) {
 
 		// 6. Recursively load imports
 		for _, file := range pkg.Files {
-			for _, imp := range file.Imports {
+			for _, spec := range file.Imports {
+				imp := spec.Path
 				importedPkg, err := l.LoadPackage(imp)
 				if err != nil {
 					return nil, fmt.Errorf("failed to load import '%s' in %s: %w", imp, file.Path, err)

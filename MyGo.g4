@@ -5,7 +5,14 @@ program: packageDecl? importStmt* statement+ EOF;
 
 packageDecl: 'package' ID ';'? ;
 
-importStmt: 'import' STRING ';';
+importStmt
+    : 'import' '{' importSpec (',' importSpec)* ','? '}' ';'? # BlockImport
+    | 'import' importSpec ';'?                                # SingleImport
+    ;
+
+importSpec
+    : STRING ('as' ID)?
+    ;
 
 statement
     : varDecl

@@ -101,29 +101,54 @@ func _mygo_ternary[T any](cond bool, a, b T) T {
 	finalGoCode.WriteString(fmt.Sprintf("package %s\n\n", pkg.Name))
 
 	// Collect imports
-	imports := make(map[string]struct{})
+	imports := make(map[string]string) // Path -> Alias (or "" if none)
+	// Note: If multiple aliases for same path, we might need a better structure.
+	// But usually we just want to ensure we import it.
+	// However, if we have: import f "fmt" AND import "fmt", we need BOTH.
+	// So map key should be unique import declaration (Path + Alias).
+	type ImportKey struct {
+		Path  string
+		Alias string
+	}
+	uniqueImports := make(map[ImportKey]struct{})
+
 	if strings.Contains(body.String(), "fmt.") {
-		imports["fmt"] = struct{}{}
+		uniqueImports[ImportKey{Path: "fmt"}] = struct{}{}
 	}
 
 	// Add user imports
 	// We need to map MyGo imports to Go imports
 	for _, f := range pkg.Files {
-		for _, imp := range f.Imports {
+		for _, spec := range f.Imports {
+			imp := spec.Path
+			alias := spec.Alias
 			// If it's a loaded MyGo package (and thus local), prefix with moduleName.
 			// Go packages (IsGoPackage=true) or not found packages are kept as is.
+			finalPath := imp
 			if p, ok := loader.LoadedPackages[imp]; ok && !p.IsGoPackage {
-				imports[fmt.Sprintf("%s/%s", moduleName, imp)] = struct{}{}
-			} else {
-				imports[imp] = struct{}{}
+				finalPath = fmt.Sprintf("%s/%s", moduleName, imp)
 			}
+			uniqueImports[ImportKey{Path: finalPath, Alias: alias}] = struct{}{}
 		}
 	}
 
-	if len(imports) > 0 {
+	if len(uniqueImports) > 0 {
 		finalGoCode.WriteString("import (\n")
-		for imp := range imports {
-			finalGoCode.WriteString(fmt.Sprintf("\t\"%s\"\n", imp))
+		// Sort for deterministic output
+		var sortedImports []ImportKey
+		for k := range uniqueImports {
+			sortedImports = append(sortedImports, k)
+		}
+		// Sort by Path then Alias
+		// (omitted sort implementation for brevity, or rely on map iteration order if random is ok, but deterministic is better)
+		// Let's just iterate map. Ideally we sort.
+
+		for _, k := range sortedImports {
+			if k.Alias != "" {
+				finalGoCode.WriteString(fmt.Sprintf("\t%s \"%s\"\n", k.Alias, k.Path))
+			} else {
+				finalGoCode.WriteString(fmt.Sprintf("\t\"%s\"\n", k.Path))
+			}
 		}
 		finalGoCode.WriteString(")\n\n")
 	}

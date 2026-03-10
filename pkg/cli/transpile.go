@@ -74,12 +74,13 @@ var transpileCmd = &cobra.Command{
 					if importStmt, ok := child.(*ast.ImportStmtContext); ok {
 						rawStr := importStmt.STRING().GetText()
 						importPath := strings.Trim(rawStr, "\"")
-						pkg.Files[0].Imports = append(pkg.Files[0].Imports, importPath)
+						pkg.Files[0].Imports = append(pkg.Files[0].Imports, compiler.ImportSpec{Path: importPath})
 					}
 				}
 
 				// Load imports
-				for _, imp := range pkg.Files[0].Imports {
+				for _, spec := range pkg.Files[0].Imports {
+					imp := spec.Path
 					importedPkg, err := loader.LoadPackage(imp)
 					if err != nil {
 						return fmt.Errorf("failed to load import '%s': %w", imp, err)

@@ -3,7 +3,8 @@
 dist/
 
 # Documentation (as requested)
-docs/
+docs/syntax_reference
+docs/开发过程临时性文档
 
 # Tests (as requested)
 tests/

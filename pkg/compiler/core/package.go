@@ -19,5 +19,10 @@ type SourceFile struct {
 	Path    string
 	Code    string
 	AST     ast.IProgramContext
-	Imports []string // Import paths extracted from AST
+	Imports []ImportSpec // Import paths and aliases extracted from AST
+}
+
+type ImportSpec struct {
+	Path  string
+	Alias string
 }
