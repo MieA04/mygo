@@ -9,6 +9,7 @@ import (
 	"github.com/antlr4-go/antlr/v4"
 	"github.com/miea04/mygo/pkg/ast"
 	"github.com/miea04/mygo/pkg/compiler"
+	"github.com/miea04/mygo/pkg/compiler/core"
 	"github.com/miea04/mygo/pkg/compiler/semantic"
 	"github.com/miea04/mygo/pkg/compiler/symbols"
 	"github.com/spf13/cobra"
@@ -74,7 +75,7 @@ var transpileCmd = &cobra.Command{
 					if importStmt, ok := child.(*ast.ImportStmtContext); ok {
 						rawStr := importStmt.STRING().GetText()
 						importPath := strings.Trim(rawStr, "\"")
-						pkg.Files[0].Imports = append(pkg.Files[0].Imports, compiler.ImportSpec{Path: importPath})
+						pkg.Files[0].Imports = append(pkg.Files[0].Imports, core.ImportSpec{Path: importPath})
 					}
 				}
 
@@ -135,7 +136,7 @@ var transpileCmd = &cobra.Command{
 			return nil
 		}
 
-		fmt.Println("\n✨ 【生成的原生 Go 源码】:")
+		fmt.Println("\n[Generated Native Go Source]:")
 		fmt.Println(finalGoCode)
 		return nil
 	},

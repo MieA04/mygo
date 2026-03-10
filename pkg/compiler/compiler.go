@@ -101,7 +101,7 @@ func _mygo_ternary[T any](cond bool, a, b T) T {
 	finalGoCode.WriteString(fmt.Sprintf("package %s\n\n", pkg.Name))
 
 	// Collect imports
-	imports := make(map[string]string) // Path -> Alias (or "" if none)
+	// imports := make(map[string]string) // Path -> Alias (or "" if none)
 	// Note: If multiple aliases for same path, we might need a better structure.
 	// But usually we just want to ensure we import it.
 	// However, if we have: import f "fmt" AND import "fmt", we need BOTH.

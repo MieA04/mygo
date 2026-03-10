@@ -236,14 +236,13 @@ mygo build [options] <source.mygo|directory>
 
 For detailed syntax and design documentation, please refer to the `docs/` directory:
 
-- [Syntax Reference](docs/语法/)
-  - [01 Basic Syntax](docs/语法/01_基础语法.md)
-  - [02 Control Flow](docs/语法/02_流程控制.md)
-  - [03 Functions & Closures](docs/语法/03_函数与闭包.md)
-  - [04 Data Structures](docs/语法/04_数据结构.md)
-  - [05 OOP & Generics](docs/语法/05_面向对象与泛型.md)
-  - [06 Error Handling & Concurrency](docs/语法/06_错误处理与并发.md)
-  - [07 Packages & Visibility](docs/语法/07_包管理与可见性.md)
+- **Basic Syntax**: [English](docs/BasicSyntax-en.md) | [简体中文](docs/BasicSyntax-zh.md)
+- **Control Flow**: [English](docs/ControlFlow-en.md) | [简体中文](docs/ControlFlow-zh.md)
+- **Functions & Closures**: [English](docs/FunctionsAndClosures-en.md) | [简体中文](docs/FunctionsAndClosures-zh.md)
+- **Data Structures**: [English](docs/DataStructures-en.md) | [简体中文](docs/DataStructures-zh.md)
+- **OOP & Generics**: [English](docs/OOPAndGenerics-en.md) | [简体中文](docs/OOPAndGenerics-zh.md)
+- **Error Handling & Concurrency**: [English](docs/ErrorHandlingAndConcurrency-en.md) | [简体中文](docs/ErrorHandlingAndConcurrency-zh.md)
+- **Packages & Visibility**: [English](docs/PackageManagementAndVisibility-en.md) | [简体中文](docs/PackageManagementAndVisibility-zh.md)
 
 ## Contribution
 

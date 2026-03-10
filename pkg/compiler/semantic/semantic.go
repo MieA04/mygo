@@ -45,6 +45,10 @@ func (a *SemanticAnalyzer) GetErrors() []string {
 	return a.errors
 }
 
+func (a *SemanticAnalyzer) GetWarnings() []string {
+	return a.warnings
+}
+
 func (a *SemanticAnalyzer) reportTypeError(code, format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
 	a.errors = append(a.errors, fmt.Sprintf("[%s] %s", code, msg))

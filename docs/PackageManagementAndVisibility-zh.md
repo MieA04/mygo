@@ -6,6 +6,12 @@ MyGo 采用模块化设计，使用包 (Package) 来组织代码。它与 Go 语
 
 每个源文件都必须隶属于一个包。包声明位于文件的第一行（注释除外）。
 
+### 语法定义
+```antlr
+packageDecl: 'package' ID ';'? ;
+```
+
+### 示例
 ```mygo
 package main
 
@@ -16,24 +22,45 @@ package math_utils
 - `package main`：定义可执行程序的入口包，必须包含 `main` 函数。
 - 其他包名：通常与目录名保持一致，用于库代码。
 
+---
+
 ## 2. 导入 (Import)
 
-使用 `import` 关键字导入依赖包。
+使用 `import` 关键字导入依赖包。MyGo 支持单行导入和块导入。
 
-```mygo
-// 单行导入
-import "fmt"
-import "net/http"
-
-// 导入本地包 (路径相对于项目根目录或 module)
-import "myproject/pkg/utils"
+### 语法定义
+```antlr
+importStmt
+    : 'import' '{' importSpec (',' importSpec)* ','? '}' ';'? # BlockImport
+    | 'import' importSpec ';'?                                # SingleImport
+    ;
+importSpec: STRING ('as' ID)? ;
 ```
 
-## 3. 可见性修饰符 (Visibility)
+### 示例
+```mygo
+// 单行导入
+import "fmt";
+
+// 块导入
+import {
+    "net/http",
+    "os" as std_os // 别名导入
+}
+```
+
+---
+
+## 3. 可见性修饰符 (Visibility Modifiers)
 
 MyGo 摒弃了 Go 语言"首字母大小写决定可见性"的隐式规则，转而采用显式的关键字修饰符。这使得代码意图更加清晰，且不受命名风格限制。
 
-MyGo 提供了三个可见性级别：
+### 语法定义
+```antlr
+modifier: 'pub' | 'pkg' | 'pri' ;
+```
+
+### 3.1 级别说明
 
 | 关键字 | 级别 | 说明 | 适用范围 |
 | :--- | :--- | :--- | :--- |
@@ -41,7 +68,7 @@ MyGo 提供了三个可见性级别：
 | **pkg** | Package | 包内可见 | 同一个包下的所有文件可访问 (默认级别) |
 | **pri** | Private | 文件私有 | 仅当前源文件内可见 |
 
-### 示例详解
+### 3.2 示例详解
 
 假设我们有一个数学库包 `math_lib`。
 
@@ -65,19 +92,9 @@ pub struct Vector {
 pub fn NewVector(x: float, y: float): Vector {
     return Vector{X: x, Y: y, cachedLength: 0.0, secretKey: "hidden"};
 }
-
-// pkg: 包内辅助函数 (其他同包文件可调用，但包外不可见)
-fn calculateInternal(v: Vector): float {
-    return v.X * v.Y;
-}
-
-// pri: 私有辅助函数 (仅此文件内部可用)
-pri fn deepSecret() {
-    fmt.Println("Internal use only");
-}
 ```
 
-### 编译映射 (Transpilation Mapping)
+### 3.3 编译映射 (Transpilation Mapping)
 
 当 MyGo 代码被转译为 Go 代码时，编译器会自动处理命名转换以符合 Go 的可见性规则：
 
@@ -85,6 +102,8 @@ pri fn deepSecret() {
 - `pkg` / `pri` 符号 -> 转译为 **小写首字母** (例如 `newVector` 或 `newVector_suffix`).
 
 这种设计让你可以在 MyGo 中自由使用小写字母开头的公开函数（如 `pub fn add()`），而编译器会负责将其转换为 Go 能够导出的 `Add()`。
+
+---
 
 ## 4. 混合编译 (Mixed Compilation)
 

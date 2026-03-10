@@ -31,7 +31,7 @@ func ResolveGenericArgs(sym *symbols.Symbol, ctxArgs ast.ITypeArgsContext, resol
 
 	required := sym.GenericParams
 	if len(provided) > len(required) {
-		return nil, fmt.Errorf("泛型参数过多: 期望 %d, 实际 %d", len(required), len(provided))
+		return nil, fmt.Errorf("too many generic arguments: expected %d, got %d", len(required), len(provided))
 	}
 
 	result := make([]string, len(required))
@@ -43,7 +43,7 @@ func ResolveGenericArgs(sym *symbols.Symbol, ctxArgs ast.ITypeArgsContext, resol
 			defaultVal = required[i].DefaultMyGo
 		}
 		if defaultVal == "" {
-			return nil, fmt.Errorf("缺失泛型参数: %s", required[i].Name)
+			return nil, fmt.Errorf("missing generic argument: %s", required[i].Name)
 		}
 		result[i] = resolver(defaultVal)
 	}
@@ -945,7 +945,7 @@ func ResolveTypeWithScope(rawText string, scope *symbols.Scope) string {
 
 			required := sym.GenericParams
 			if len(provided) > len(required) {
-				panic(fmt.Sprintf("泛型参数过多: %s, 期望 %d, 实际 %d", baseName, len(required), len(provided)))
+				panic(fmt.Sprintf("too many generic arguments: %s, expected %d, got %d", baseName, len(required), len(provided)))
 			}
 
 			finalArgs := make([]string, len(required))
@@ -953,7 +953,7 @@ func ResolveTypeWithScope(rawText string, scope *symbols.Scope) string {
 
 			for i := len(provided); i < len(required); i++ {
 				if required[i].DefaultType == "" {
-					panic(fmt.Sprintf("类型引用 %s 缺失泛型参数 %s 且无默认值", baseName, required[i].Name))
+					panic(fmt.Sprintf("type reference %s missing generic argument %s and has no default value", baseName, required[i].Name))
 				}
 				finalArgs[i] = required[i].DefaultType
 			}

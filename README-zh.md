@@ -236,14 +236,13 @@ mygo build [options] <source.mygo|directory>
 
 详细的语法和设计文档请参考 `docs/` 目录：
 
-- [语法参考](docs/语法/)
-  - [01 基础语法](docs/语法/01_基础语法.md)
-  - [02 流程控制](docs/语法/02_流程控制.md)
-  - [03 函数与闭包](docs/语法/03_函数与闭包.md)
-  - [04 数据结构](docs/语法/04_数据结构.md)
-  - [05 面向对象与泛型](docs/语法/05_面向对象与泛型.md)
-  - [06 错误处理与并发](docs/语法/06_错误处理与并发.md)
-  - [07 包管理与可见性](docs/语法/07_包管理与可见性.md)
+- **基础语法**: [English](docs/BasicSyntax-en.md) | [简体中文](docs/BasicSyntax-zh.md)
+- **流程控制**: [English](docs/ControlFlow-en.md) | [简体中文](docs/ControlFlow-zh.md)
+- **函数与闭包**: [English](docs/FunctionsAndClosures-en.md) | [简体中文](docs/FunctionsAndClosures-zh.md)
+- **数据结构**: [English](docs/DataStructures-en.md) | [简体中文](docs/DataStructures-zh.md)
+- **面向对象与泛型**: [English](docs/OOPAndGenerics-en.md) | [简体中文](docs/OOPAndGenerics-zh.md)
+- **错误处理与并发**: [English](docs/ErrorHandlingAndConcurrency-en.md) | [简体中文](docs/ErrorHandlingAndConcurrency-zh.md)
+- **包管理与可见性**: [English](docs/PackageManagementAndVisibility-en.md) | [简体中文](docs/PackageManagementAndVisibility-zh.md)
 
 ## 贡献
 

@@ -137,7 +137,7 @@ expr
     | expr '(' exprList? ')'                                # CallExpr
     | expr '[' expr ']'                                     # ArrayIndexExpr
     | '[' exprList? ']'                                     # ArrayLiteralExpr
-    | qualifiedName typeArgs? '{' (ID ':' expr (',' ID ':' expr)* ','?)? '}' # StructLiteralExpr  // 🎯 结构体实例化 User{}
+    | qualifiedName typeArgs? '{' (ID ':' expr (',' ID ':' expr)* ','?)? '}' # StructLiteralExpr  // Struct instantiation User{}
     | expr '?!' (block | statement)?                        # TryUnwrapExpr
     | expr '?!!'                                            # PanicUnwrapExpr
     | expr 'is' typeType                                    # IsExpr
