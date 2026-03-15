@@ -223,9 +223,47 @@ func IsRuneSliceType(typeName string) bool {
 	return NormalizeTypeName(typeName) == "rune[]"
 }
 
+func isOptionBaseName(base string) bool {
+	base = NormalizeTypeName(base)
+	return base == "Option" || strings.HasSuffix(base, ".Option")
+}
+
+func IsOptionType(typeName string) bool {
+	t := NormalizeTypeName(typeName)
+	base := SplitBaseType(t)
+	if !isOptionBaseName(base) {
+		return false
+	}
+	return strings.Contains(t, "<") || strings.Contains(t, "[")
+}
+
+func OptionInnerType(typeName string) (string, bool) {
+	t := NormalizeTypeName(typeName)
+	base := SplitBaseType(t)
+	if !isOptionBaseName(base) {
+		return "", false
+	}
+	start := strings.IndexAny(t, "[<")
+	if start == -1 {
+		return "", false
+	}
+	end := strings.LastIndexAny(t, "]>")
+	if end <= start {
+		return "", false
+	}
+	parts := SplitTopLevelTypeArgs(t[start+1 : end])
+	if len(parts) != 1 {
+		return "", false
+	}
+	return parts[0], true
+}
+
 func IsNilCompatible(typeName string, scope *symbols.Scope) bool {
 	t := NormalizeTypeName(typeName)
-	if strings.HasPrefix(t, "*") || strings.HasSuffix(t, "[]") || strings.HasPrefix(t, "map[") || strings.HasPrefix(t, "func") {
+	if strings.HasPrefix(t, "*") || strings.HasSuffix(t, "[]") || strings.HasPrefix(t, "map[") || strings.HasPrefix(t, "Map<") || strings.HasPrefix(t, "func") {
+		return true
+	}
+	if IsOptionType(t) {
 		return true
 	}
 	// Check if it's a trait
@@ -252,6 +290,20 @@ func IsTypeAssignable(target, value string, scope *symbols.Scope) bool {
 	}
 	if value == "nil" {
 		return IsNilCompatible(target, scope)
+	}
+	if IsOptionType(target) {
+		targetInner, ok := OptionInnerType(target)
+		if !ok {
+			return false
+		}
+		if IsOptionType(value) {
+			valueInner, valueOK := OptionInnerType(value)
+			if !valueOK {
+				return false
+			}
+			return IsTypeAssignable(targetInner, valueInner, scope)
+		}
+		return IsTypeAssignable(targetInner, value, scope)
 	}
 	if CanImplicitPromote(value, target) {
 		return true
@@ -536,6 +588,17 @@ func ExtractCollectionTypes(colType string, scope *symbols.Scope) (kType string,
 			vType = colType[idx+1:]
 			return
 		}
+	} else if strings.HasPrefix(colType, "Map<") {
+		idx := strings.LastIndex(colType, ">")
+		if idx != -1 {
+			inner := colType[4:idx]
+			parts := SplitTopLevelTypeArgs(inner)
+			if len(parts) == 2 {
+				kType = parts[0]
+				vType = parts[1]
+				return
+			}
+		}
 	} else if colType == "string" {
 		kType = "int"
 		vType = "byte"
@@ -546,6 +609,8 @@ func ExtractCollectionTypes(colType string, scope *symbols.Scope) (kType string,
 
 func ExtractMethodInfo(methodCtx interface{}, scope *symbols.Scope) (string, []symbols.GenericParamMeta, bool) {
 	switch m := methodCtx.(type) {
+	case *symbols.Symbol:
+		return ParseRetTypeFromSignature(m.Type), m.GenericParams, true
 	case *ast.FnDeclContext:
 		retType := "void"
 		if m.TypeType() != nil {
@@ -561,6 +626,39 @@ func ExtractMethodInfo(methodCtx interface{}, scope *symbols.Scope) (string, []s
 	default:
 		return "", nil, false
 	}
+}
+
+func ParseRetTypeFromSignature(sig string) string {
+	if !strings.HasPrefix(sig, "fn(") {
+		return "void"
+	}
+
+	balance := 1
+	closeParenIdx := -1
+	for i := 3; i < len(sig); i++ {
+		if sig[i] == '(' {
+			balance++
+		} else if sig[i] == ')' {
+			balance--
+			if balance == 0 {
+				closeParenIdx = i
+				break
+			}
+		}
+	}
+
+	if closeParenIdx == -1 {
+		return "void"
+	}
+
+	rest := sig[closeParenIdx+1:]
+	rest = strings.TrimSpace(rest)
+	if strings.HasPrefix(rest, ":") {
+		rest = strings.TrimPrefix(rest, ":")
+		return strings.TrimSpace(rest)
+	}
+
+	return "void"
 }
 
 func ExtractGenericParamMeta(typeParams ast.ITypeParamsContext, scope *symbols.Scope) []symbols.GenericParamMeta {
@@ -630,9 +728,20 @@ func ExtractMethodParamTypes(methodCtx interface{}, scope *symbols.Scope) ([]str
 }
 
 func ResolveInstanceTypeArgs(objType string, sym *symbols.Symbol, resolver func(string) string, useDefaults bool) []string {
-	// Extract args from objType e.g. List[int] -> [int]
+	// Extract args from objType e.g. List[int] -> [int] or Box<int> -> <int>
+	startIdx := -1
+	endIdx := -1
+
 	if idx := strings.Index(objType, "["); idx != -1 {
-		inner := objType[idx+1 : len(objType)-1]
+		startIdx = idx
+		endIdx = strings.LastIndex(objType, "]")
+	} else if idx := strings.Index(objType, "<"); idx != -1 {
+		startIdx = idx
+		endIdx = strings.LastIndex(objType, ">")
+	}
+
+	if startIdx != -1 && endIdx != -1 && endIdx > startIdx {
+		inner := objType[startIdx+1 : endIdx]
 		return SplitTopLevelTypeArgs(inner)
 	}
 	return nil
@@ -687,7 +796,8 @@ func InferExprType(expr antlr.ParseTree, scope *symbols.Scope) string {
 
 			for i := 0; i < len(ids); i++ {
 				fieldName := ids[i].GetText()
-				if fieldType, ok := sym.Fields[fieldName]; ok {
+				if fieldSym, ok := sym.FieldMap[fieldName]; ok {
+					fieldType := fieldSym.Type
 					for _, gp := range sym.GenericParams {
 						if fieldType == gp.Name {
 							if i < len(exprs) {
@@ -729,6 +839,31 @@ func InferExprType(expr antlr.ParseTree, scope *symbols.Scope) string {
 				return idName
 			}
 			return sym.Type
+		}
+
+		if strings.Contains(idName, ".") {
+			parts := strings.Split(idName, ".")
+			rootName := parts[0]
+			currentType := "unknown"
+
+			// Try to resolve root variable
+			if sym := scope.Resolve(rootName); sym != nil {
+				if sym.Kind == symbols.KindVar || sym.Kind == symbols.KindFunc {
+					currentType = sym.Type
+				}
+			}
+
+			if currentType != "unknown" {
+				for i := 1; i < len(parts); i++ {
+					fieldName := parts[i]
+					nextType := ResolveMemberType(currentType, fieldName, scope)
+					if nextType == "unknown" {
+						return "unknown"
+					}
+					currentType = nextType
+				}
+				return currentType
+			}
 		}
 	case *ast.NilExprContext:
 		return "nil"
@@ -924,6 +1059,20 @@ func InferExprType(expr antlr.ParseTree, scope *symbols.Scope) string {
 			}
 		}
 
+		// Map method return type inference
+		if strings.HasPrefix(objType, "Map<") || strings.HasPrefix(objType, "map[") {
+			methodName := e.ID().GetText()
+			kType, vType := ExtractCollectionTypes(objType, scope)
+			switch methodName {
+			case "keys":
+				return kType + "[]"
+			case "values":
+				return vType + "[]"
+			case "has":
+				return "bool"
+			}
+		}
+
 		if IsChannelType(objType) {
 			methodName := e.ID().GetText()
 			if methodName == "read" {
@@ -973,30 +1122,7 @@ func InferExprType(expr antlr.ParseTree, scope *symbols.Scope) string {
 		}
 		fieldName := e.ID().GetText()
 
-		fmt.Fprintf(os.Stderr, "DEBUG: MemberAccess %s.%s (objType=%s)\n", e.Expr().GetText(), fieldName, objType)
-
-		baseType := SplitBaseType(objType)
-		sym := ResolveTypeSymbol(baseType, scope)
-		if sym != nil {
-			if sym.Kind == symbols.KindPackage {
-				if sym.ImportedScope != nil {
-					if member := sym.ImportedScope.Resolve(fieldName); member != nil {
-						return member.Type
-					}
-				}
-			} else if sym.Kind == symbols.KindStruct {
-				if fieldType, ok := sym.Fields[fieldName]; ok {
-					if len(sym.GenericParams) > 0 {
-						if args := ResolveInstanceTypeArgs(objType, sym, func(t string) string {
-							return ResolveTypeWithScope(t, scope)
-						}, true); len(args) > 0 {
-							return SubstituteTypeParams(fieldType, sym.GenericParams, args)
-						}
-					}
-					return fieldType
-				}
-			}
-		}
+		return ResolveMemberType(objType, fieldName, scope)
 	}
 	return "unknown"
 }
@@ -1006,8 +1132,31 @@ func ResolveTypeWithScope(rawText string, scope *symbols.Scope) string {
 		return ""
 	}
 	rawText = NormalizeTypeName(rawText)
+	optionalDepth := 0
+	for strings.HasSuffix(rawText, "?") {
+		optionalDepth++
+		rawText = strings.TrimSuffix(rawText, "?")
+	}
+	if optionalDepth > 1 {
+		panic("nested optional types are not supported in current phase")
+	}
+
+	if strings.HasPrefix(rawText, "(") && strings.HasSuffix(rawText, ")") {
+		inner := rawText[1 : len(rawText)-1]
+		parts := SplitTopLevelTypeArgs(inner)
+		var resolvedParts []string
+		for _, p := range parts {
+			resolvedParts = append(resolvedParts, ResolveTypeWithScope(p, scope))
+		}
+		return "(" + strings.Join(resolvedParts, ",") + ")"
+	}
+
 	if strings.HasPrefix(rawText, "*") {
 		return "*" + ResolveTypeWithScope(strings.TrimSpace(rawText[1:]), scope)
+	}
+
+	if optionalDepth == 1 {
+		return fmt.Sprintf("Option<%s>", ResolveTypeWithScope(rawText, scope))
 	}
 
 	baseName := SplitBaseType(rawText)
@@ -1096,6 +1245,33 @@ func ParseGenericParamMeta(metas []symbols.GenericParamMeta) (string, string) {
 		usages = append(usages, meta.Name)
 	}
 	return fmt.Sprintf("[%s]", strings.Join(defs, ", ")), fmt.Sprintf("[%s]", strings.Join(usages, ", "))
+}
+
+func ResolveMemberType(objType, memberName string, scope *symbols.Scope) string {
+	baseType := SplitBaseType(objType)
+	sym := ResolveTypeSymbol(baseType, scope)
+	if sym != nil {
+		if sym.Kind == symbols.KindPackage {
+			if sym.ImportedScope != nil {
+				if member := sym.ImportedScope.Resolve(memberName); member != nil {
+					return member.Type
+				}
+			}
+		} else if sym.Kind == symbols.KindStruct {
+			if fieldSym, ok := sym.FieldMap[memberName]; ok {
+				fieldType := fieldSym.Type
+				if len(sym.GenericParams) > 0 {
+					if args := ResolveInstanceTypeArgs(objType, sym, func(t string) string {
+						return ResolveTypeWithScope(t, scope)
+					}, true); len(args) > 0 {
+						return SubstituteTypeParams(fieldType, sym.GenericParams, args)
+					}
+				}
+				return fieldType
+			}
+		}
+	}
+	return "unknown"
 }
 
 func IsSimpleIdentifier(expr interface{}) bool {

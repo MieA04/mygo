@@ -118,11 +118,14 @@ type MyGoListener interface {
 	// EnterTraitBodyItem is called when entering the traitBodyItem production.
 	EnterTraitBodyItem(c *TraitBodyItemContext)
 
-	// EnterSpecificBan is called when entering the SpecificBan production.
-	EnterSpecificBan(c *SpecificBanContext)
+	// EnterBanDirective is called when entering the BanDirective production.
+	EnterBanDirective(c *BanDirectiveContext)
 
-	// EnterRepeatBan is called when entering the RepeatBan production.
-	EnterRepeatBan(c *RepeatBanContext)
+	// EnterFlipBanDirective is called when entering the FlipBanDirective production.
+	EnterFlipBanDirective(c *FlipBanDirectiveContext)
+
+	// EnterFlipBanItem is called when entering the flipBanItem production.
+	EnterFlipBanItem(c *FlipBanItemContext)
 
 	// EnterReturnStmt is called when entering the returnStmt production.
 	EnterReturnStmt(c *ReturnStmtContext)
@@ -208,6 +211,9 @@ type MyGoListener interface {
 	// EnterDerefExpr is called when entering the DerefExpr production.
 	EnterDerefExpr(c *DerefExprContext)
 
+	// EnterTargetExpr is called when entering the TargetExpr production.
+	EnterTargetExpr(c *TargetExprContext)
+
 	// EnterLogicalAndExpr is called when entering the LogicalAndExpr production.
 	EnterLogicalAndExpr(c *LogicalAndExprContext)
 
@@ -258,6 +264,9 @@ type MyGoListener interface {
 
 	// EnterTupleExpr is called when entering the TupleExpr production.
 	EnterTupleExpr(c *TupleExprContext)
+
+	// EnterPrefixExpr is called when entering the PrefixExpr production.
+	EnterPrefixExpr(c *PrefixExprContext)
 
 	// EnterLogicalOrExpr is called when entering the LogicalOrExpr production.
 	EnterLogicalOrExpr(c *LogicalOrExprContext)
@@ -403,11 +412,14 @@ type MyGoListener interface {
 	// ExitTraitBodyItem is called when exiting the traitBodyItem production.
 	ExitTraitBodyItem(c *TraitBodyItemContext)
 
-	// ExitSpecificBan is called when exiting the SpecificBan production.
-	ExitSpecificBan(c *SpecificBanContext)
+	// ExitBanDirective is called when exiting the BanDirective production.
+	ExitBanDirective(c *BanDirectiveContext)
 
-	// ExitRepeatBan is called when exiting the RepeatBan production.
-	ExitRepeatBan(c *RepeatBanContext)
+	// ExitFlipBanDirective is called when exiting the FlipBanDirective production.
+	ExitFlipBanDirective(c *FlipBanDirectiveContext)
+
+	// ExitFlipBanItem is called when exiting the flipBanItem production.
+	ExitFlipBanItem(c *FlipBanItemContext)
 
 	// ExitReturnStmt is called when exiting the returnStmt production.
 	ExitReturnStmt(c *ReturnStmtContext)
@@ -493,6 +505,9 @@ type MyGoListener interface {
 	// ExitDerefExpr is called when exiting the DerefExpr production.
 	ExitDerefExpr(c *DerefExprContext)
 
+	// ExitTargetExpr is called when exiting the TargetExpr production.
+	ExitTargetExpr(c *TargetExprContext)
+
 	// ExitLogicalAndExpr is called when exiting the LogicalAndExpr production.
 	ExitLogicalAndExpr(c *LogicalAndExprContext)
 
@@ -543,6 +558,9 @@ type MyGoListener interface {
 
 	// ExitTupleExpr is called when exiting the TupleExpr production.
 	ExitTupleExpr(c *TupleExprContext)
+
+	// ExitPrefixExpr is called when exiting the PrefixExpr production.
+	ExitPrefixExpr(c *PrefixExprContext)
 
 	// ExitLogicalOrExpr is called when exiting the LogicalOrExpr production.
 	ExitLogicalOrExpr(c *LogicalOrExprContext)

@@ -78,15 +78,13 @@ func (i *Interpreter) VisitBlock(ctx *ast.BlockContext) interface{} {
 
 	// Execute statements
 	for _, stmt := range ctx.AllStatement() {
-		// Explicitly cast to concrete type to bypass missing Accept method issue
-		concreteStmt, ok := stmt.(*ast.StatementContext)
-		if !ok {
-			continue
-		}
-		res := i.VisitStatement(concreteStmt)
-		// Check for return?
-		if ret, isReturn := res.(ReturnValue); isReturn {
-			return ret
+		// Explicitly cast to concrete type
+		if concreteStmt, ok := stmt.(*ast.StatementContext); ok {
+			res := i.VisitStatement(concreteStmt)
+			// Check for return?
+			if ret, isReturn := res.(ReturnValue); isReturn {
+				return ret
+			}
 		}
 	}
 	return nil
@@ -119,9 +117,8 @@ func (i *Interpreter) VisitIteratorForStmt(ctx *ast.IteratorForStmtContext) inte
 		i.Env.Set(loopVar, item)
 
 		// Execute block
-		// Explicitly cast to concrete BlockContext
-		if block, ok := ctx.Block().(*ast.BlockContext); ok {
-			res := i.VisitBlock(block)
+		if blockCtx, ok := ctx.Block().(*ast.BlockContext); ok {
+			res := i.VisitBlock(blockCtx)
 			if res != nil {
 				// Handle break/return/continue if we supported them
 				// For now, if we get a ReturnValue, we should return it
@@ -199,14 +196,23 @@ func (i *Interpreter) VisitBinaryCompareExpr(ctx *ast.BinaryCompareExprContext) 
 		}
 	}
 
-	// Handle int equality
+	// Handle int equality and comparison
 	lInt, lOkInt := left.(IntValue)
 	rInt, rOkInt := right.(IntValue)
 	if lOkInt && rOkInt {
-		if op == "==" {
+		switch op {
+		case "==":
 			return lInt.Val == rInt.Val
-		} else if op == "!=" {
+		case "!=":
 			return lInt.Val != rInt.Val
+		case ">":
+			return lInt.Val > rInt.Val
+		case "<":
+			return lInt.Val < rInt.Val
+		case ">=":
+			return lInt.Val >= rInt.Val
+		case "<=":
+			return lInt.Val <= rInt.Val
 		}
 	}
 
@@ -351,7 +357,19 @@ func (i *Interpreter) VisitAddSubExpr(ctx *ast.AddSubExprContext) interface{} {
 				return StringValue{Val: lVal.String() + rStr.Val}
 			}
 		}
-		// TODO: Int addition
+		// Handle int addition
+		lInt, lOkInt := left.(IntValue)
+		rInt, rOkInt := right.(IntValue)
+		if lOkInt && rOkInt {
+			return IntValue{Val: lInt.Val + rInt.Val}
+		}
+	} else if op == "-" {
+		// Handle int subtraction
+		lInt, lOkInt := left.(IntValue)
+		rInt, rOkInt := right.(IntValue)
+		if lOkInt && rOkInt {
+			return IntValue{Val: lInt.Val - rInt.Val}
+		}
 	}
 	return nil
 }
@@ -389,6 +407,11 @@ func (i *Interpreter) resolveValue(name string) Value {
 	return nil
 }
 
+func (i *Interpreter) VisitTargetExpr(ctx *ast.TargetExprContext) interface{} {
+	val := i.resolveValue("target")
+	return val
+}
+
 func (i *Interpreter) VisitFuncCallExpr(ctx *ast.FuncCallExprContext) interface{} {
 	funcName := ctx.QualifiedName().GetText()
 	// fmt.Fprintf(os.Stderr, "DEBUG: VisitFuncCallExpr %s\n", funcName)
@@ -412,10 +435,47 @@ func (i *Interpreter) VisitFuncCallExpr(ctx *ast.FuncCallExprContext) interface{
 		syms := i.Scope.CollectAnnotatedSymbols(annName)
 		var list []Value
 		for _, sym := range syms {
-			meta := i.createSymbolMeta(sym)
+			meta := i.CreateSymbolMeta(sym)
 			list = append(list, meta)
 		}
 		return ListValue{Val: list}
+	} else if funcName == "get_tag" {
+		if ctx.ExprList() == nil || len(ctx.ExprList().AllExpr()) != 2 {
+			return StringValue{Val: ""}
+		}
+		tagVal := ctx.ExprList().Expr(0).Accept(i)
+		keyVal := ctx.ExprList().Expr(1).Accept(i)
+
+		tagStr, ok1 := tagVal.(StringValue)
+		keyStr, ok2 := keyVal.(StringValue)
+
+		if ok1 && ok2 {
+			// Simple tag parsing: key:"value"
+			// This is a naive implementation
+			tag := tagStr.Val
+			key := keyStr.Val
+
+			// Remove quotes from tag if present (MyGo STRING has quotes)
+			// But StringValue.Val should be unquoted by VisitStringExpr?
+			// VisitStringExpr uses strconv.Unquote. So it is unquoted.
+
+			// Look for key + ":"
+			start := strings.Index(tag, key+":")
+			if start == -1 {
+				return StringValue{Val: ""}
+			}
+
+			// Look for opening quote after colon
+			rest := tag[start+len(key)+1:]
+			if len(rest) > 0 && rest[0] == '"' {
+				// Find closing quote
+				end := strings.Index(rest[1:], "\"")
+				if end != -1 {
+					return StringValue{Val: rest[1 : end+1]}
+				}
+			}
+		}
+		return StringValue{Val: ""}
 	} else if funcName == "println" {
 		if ctx.ExprList() != nil {
 			var args []interface{}
@@ -437,7 +497,7 @@ func (i *Interpreter) VisitFuncCallExpr(ctx *ast.FuncCallExprContext) interface{
 	return nil
 }
 
-func (i *Interpreter) createSymbolMeta(sym *symbols.Symbol) MetaValue {
+func (i *Interpreter) CreateSymbolMeta(sym *symbols.Symbol) MetaValue {
 	props := make(map[string]Value)
 	props["name"] = StringValue{Val: sym.MyGoName}
 	props["go_name"] = StringValue{Val: sym.GoName}
@@ -456,6 +516,18 @@ func (i *Interpreter) createSymbolMeta(sym *symbols.Symbol) MetaValue {
 		anns = append(anns, MetaValue{Props: annProps})
 	}
 	props["annotations"] = ListValue{Val: anns}
+
+	var fields []Value
+	if sym.Kind == symbols.KindStruct {
+		for _, field := range sym.Fields {
+			fProps := make(map[string]Value)
+			fProps["name"] = StringValue{Val: field.Name}
+			fProps["type"] = StringValue{Val: field.Type}
+			fProps["tag"] = StringValue{Val: field.Tag}
+			fields = append(fields, MetaValue{Props: fProps})
+		}
+	}
+	props["fields"] = ListValue{Val: fields}
 
 	return MetaValue{Props: props}
 }
@@ -490,17 +562,37 @@ func (i *Interpreter) defineValue(name string, val Value) {
 }
 
 func (i *Interpreter) VisitAssignmentStmt(ctx *ast.AssignmentStmtContext) interface{} {
-	// LHS = RHS
-	// AssignmentStmt: expr '=' expr ';'
+	// LHS op RHS
 	left := ctx.Expr(0)
 	right := ctx.Expr(1)
+	op := ctx.GetOp().GetText()
 
 	val := right.Accept(i)
 	if v, ok := val.(Value); ok {
-		// LHS must be ID
+		// LHS must be ID for now
 		if idCtx, ok := left.(*ast.IdentifierExprContext); ok {
 			name := idCtx.GetText()
-			i.Env.Update(name, v)
+
+			if op == "=" {
+				i.Env.Update(name, v)
+			} else if op == "+=" {
+				// Get current value
+				if curr, ok := i.Env.Get(name); ok {
+					// String concatenation
+					if cStr, ok1 := curr.(StringValue); ok1 {
+						if vStr, ok2 := v.(StringValue); ok2 {
+							i.Env.Update(name, StringValue{Val: cStr.Val + vStr.Val})
+						} else {
+							// Try to convert RHS to string
+							i.Env.Update(name, StringValue{Val: cStr.Val + v.String()})
+						}
+					} else if cInt, ok1 := curr.(IntValue); ok1 {
+						if vInt, ok2 := v.(IntValue); ok2 {
+							i.Env.Update(name, IntValue{Val: cInt.Val + vInt.Val})
+						}
+					}
+				}
+			}
 		}
 	}
 	return nil

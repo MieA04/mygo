@@ -28,6 +28,14 @@ type GenericParamMeta struct {
 	DefaultMyGo    string // Original MyGo type name for semantic checks
 }
 
+type FieldSymbol struct {
+	Name   string
+	Type   string
+	Tag    string // Raw tag string, e.g., "json:\"id\""
+	Line   int    // 0-based
+	Column int    // 0-based
+}
+
 type Symbol struct {
 	MyGoName             string
 	GoName               string
@@ -36,13 +44,16 @@ type Symbol struct {
 	Visibility           Visibility
 	PackageName          string
 	FilePath             string
+	Line                 int // 0-based
+	Column               int // 0-based
 	GenericParams        []GenericParamMeta
 	TraitMethods         map[string]interface{}
 	AbstractTraitMethods map[string]interface{}
 	ConcreteTraitMethods map[string]interface{}
 	Methods              map[string]interface{}
-	Variants             map[string]*Symbol // For Enums: Variant Name -> Variant Symbol
-	Fields               map[string]string  // For Structs/Variants: Field Name -> Field Type
+	Variants             map[string]*Symbol      // For Enums: Variant Name -> Variant Symbol
+	Fields               []FieldSymbol           // Ordered list of fields
+	FieldMap             map[string]*FieldSymbol // Helper map for fast lookups
 	BoundTraits          map[string]struct{}
 	ImportedScope        *Scope        // For KindPackage: The scope of the imported package
 	ASTNode              interface{}   // For Macros: Store the AST node

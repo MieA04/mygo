@@ -1,7 +1,7 @@
 grammar MyGo;
 
 // Parser Rules
-program: packageDecl? importStmt* (statement | annotationDecl)+ EOF;
+program: packageDecl? importStmt* (statement | annotationDecl)* EOF;
 
 packageDecl: 'package' ID ';'? ;
 
@@ -60,7 +60,7 @@ selectOther: 'other' ;
 
 deferStmt: 'defer' (block | exprStmt);
 
-assignmentStmt: expr '=' expr ';' ;
+assignmentStmt: expr op=('=' | '+=' | '-=' | '*=' | '/=') expr ';' ;
 
 modifier: 'pub' | 'pkg' | 'pri' ;
 
@@ -73,7 +73,7 @@ genericConstraint: ID ':' typeType ('+' typeType)* ;
 annotationUsage: '@' ID ('(' exprList? ')')? ;
 
 structDecl: annotationUsage* whereClause? modifier? 'struct' ID typeParams? '{' (structField (',' structField)* ','?)? '}' ;
-structField: ID ':' typeType ;
+structField: ID ':' typeType (STRING)? ;
 
 enumDecl: whereClause? modifier? 'enum' ID typeParams? '{' enumVariant (',' enumVariant)* ','? '}' ;
 enumVariant: ID ('(' typeList ')')? ;
@@ -93,8 +93,19 @@ traitFnDecl
 
 bindTarget: (ID ':')? typeType ;
 
-traitBodyItem: banDirective | traitFnDecl ;
-banDirective: 'flip'? 'ban' '[' ID (',' ID)* ']' ';' # SpecificBan | 'ban' 'repeat' ';' # RepeatBan ;
+traitBodyItem
+    : compositionDirective
+    | traitFnDecl
+    ;
+
+compositionDirective
+    : 'ban' '[' ID (',' ID)* ']' ';'                                # BanDirective
+    | 'flip' 'ban' '[' flipBanItem (',' flipBanItem)* ']' ';'       # FlipBanDirective
+    ;
+
+flipBanItem
+    : ID ':' ID
+    ;
 
 returnStmt: 'return' expr? ';' ;
 block: '{' statement* '}' ;
@@ -128,7 +139,7 @@ varDecl
     ;
 
 typeList: typeType (',' typeType)* ;
-typeType: '*' typeType | qualifiedName typeArgs? ('[' INT? ']')* | '(' typeList ')' | 'fn' '(' typeList? ')' (':' typeType)? ;
+typeType: ('*' typeType | qualifiedName typeArgs? ('[' INT? ']')* | '(' typeList ')' | 'fn' '(' typeList? ')' (':' typeType)?) '?'? ;
 
 qualifiedName: ID ('.' ID)* ;
 
@@ -140,6 +151,7 @@ expr
     | '(' expr ')'                                         # ParenExpr
     | '(' expr (',' expr)+ ')'                             # TupleExpr
     | '!' expr                                             # NotExpr
+    | op=('++' | '--') expr                                 # PrefixExpr
     | '&' expr                                             # AddrOfExpr
     | '*' expr                                             # DerefExpr
     | expr op=('++' | '--')                                 # PostfixExpr
@@ -150,7 +162,7 @@ expr
     | expr '[' expr ']'                                     # ArrayIndexExpr
     | '[' exprList? ']'                                     # ArrayLiteralExpr
     | qualifiedName typeArgs? '{' (ID ':' expr (',' ID ':' expr)* ','?)? '}' # StructLiteralExpr  // Struct instantiation User{}
-    | expr '?!' (block | statement)?                        # TryUnwrapExpr
+    | expr '?!'                                             # TryUnwrapExpr
     | expr '?!!'                                            # PanicUnwrapExpr
     | expr 'is' typeType                                    # IsExpr
     | expr '!is' typeType                                   # NotIsExpr
@@ -162,6 +174,7 @@ expr
     | expr '||' expr                                       # LogicalOrExpr
     | expr '?' expr ':' expr                                # TernaryExpr
     | 'this'                                                # ThisExpr
+    | 'target'                                              # TargetExpr
     | 'nil'                                                 # NilExpr
     | qualifiedName                                         # IdentifierExpr
     | '#quote' block                                        # QuoteExpr

@@ -118,11 +118,14 @@ type MyGoVisitor interface {
 	// Visit a parse tree produced by MyGoParser#traitBodyItem.
 	VisitTraitBodyItem(ctx *TraitBodyItemContext) interface{}
 
-	// Visit a parse tree produced by MyGoParser#SpecificBan.
-	VisitSpecificBan(ctx *SpecificBanContext) interface{}
+	// Visit a parse tree produced by MyGoParser#BanDirective.
+	VisitBanDirective(ctx *BanDirectiveContext) interface{}
 
-	// Visit a parse tree produced by MyGoParser#RepeatBan.
-	VisitRepeatBan(ctx *RepeatBanContext) interface{}
+	// Visit a parse tree produced by MyGoParser#FlipBanDirective.
+	VisitFlipBanDirective(ctx *FlipBanDirectiveContext) interface{}
+
+	// Visit a parse tree produced by MyGoParser#flipBanItem.
+	VisitFlipBanItem(ctx *FlipBanItemContext) interface{}
 
 	// Visit a parse tree produced by MyGoParser#returnStmt.
 	VisitReturnStmt(ctx *ReturnStmtContext) interface{}
@@ -208,6 +211,9 @@ type MyGoVisitor interface {
 	// Visit a parse tree produced by MyGoParser#DerefExpr.
 	VisitDerefExpr(ctx *DerefExprContext) interface{}
 
+	// Visit a parse tree produced by MyGoParser#TargetExpr.
+	VisitTargetExpr(ctx *TargetExprContext) interface{}
+
 	// Visit a parse tree produced by MyGoParser#LogicalAndExpr.
 	VisitLogicalAndExpr(ctx *LogicalAndExprContext) interface{}
 
@@ -258,6 +264,9 @@ type MyGoVisitor interface {
 
 	// Visit a parse tree produced by MyGoParser#TupleExpr.
 	VisitTupleExpr(ctx *TupleExprContext) interface{}
+
+	// Visit a parse tree produced by MyGoParser#PrefixExpr.
+	VisitPrefixExpr(ctx *PrefixExprContext) interface{}
 
 	// Visit a parse tree produced by MyGoParser#LogicalOrExpr.
 	VisitLogicalOrExpr(ctx *LogicalOrExprContext) interface{}

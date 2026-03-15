@@ -242,17 +242,23 @@ func (s *BaseMyGoListener) EnterTraitBodyItem(ctx *TraitBodyItemContext) {}
 // ExitTraitBodyItem is called when production traitBodyItem is exited.
 func (s *BaseMyGoListener) ExitTraitBodyItem(ctx *TraitBodyItemContext) {}
 
-// EnterSpecificBan is called when production SpecificBan is entered.
-func (s *BaseMyGoListener) EnterSpecificBan(ctx *SpecificBanContext) {}
+// EnterBanDirective is called when production BanDirective is entered.
+func (s *BaseMyGoListener) EnterBanDirective(ctx *BanDirectiveContext) {}
 
-// ExitSpecificBan is called when production SpecificBan is exited.
-func (s *BaseMyGoListener) ExitSpecificBan(ctx *SpecificBanContext) {}
+// ExitBanDirective is called when production BanDirective is exited.
+func (s *BaseMyGoListener) ExitBanDirective(ctx *BanDirectiveContext) {}
 
-// EnterRepeatBan is called when production RepeatBan is entered.
-func (s *BaseMyGoListener) EnterRepeatBan(ctx *RepeatBanContext) {}
+// EnterFlipBanDirective is called when production FlipBanDirective is entered.
+func (s *BaseMyGoListener) EnterFlipBanDirective(ctx *FlipBanDirectiveContext) {}
 
-// ExitRepeatBan is called when production RepeatBan is exited.
-func (s *BaseMyGoListener) ExitRepeatBan(ctx *RepeatBanContext) {}
+// ExitFlipBanDirective is called when production FlipBanDirective is exited.
+func (s *BaseMyGoListener) ExitFlipBanDirective(ctx *FlipBanDirectiveContext) {}
+
+// EnterFlipBanItem is called when production flipBanItem is entered.
+func (s *BaseMyGoListener) EnterFlipBanItem(ctx *FlipBanItemContext) {}
+
+// ExitFlipBanItem is called when production flipBanItem is exited.
+func (s *BaseMyGoListener) ExitFlipBanItem(ctx *FlipBanItemContext) {}
 
 // EnterReturnStmt is called when production returnStmt is entered.
 func (s *BaseMyGoListener) EnterReturnStmt(ctx *ReturnStmtContext) {}
@@ -422,6 +428,12 @@ func (s *BaseMyGoListener) EnterDerefExpr(ctx *DerefExprContext) {}
 // ExitDerefExpr is called when production DerefExpr is exited.
 func (s *BaseMyGoListener) ExitDerefExpr(ctx *DerefExprContext) {}
 
+// EnterTargetExpr is called when production TargetExpr is entered.
+func (s *BaseMyGoListener) EnterTargetExpr(ctx *TargetExprContext) {}
+
+// ExitTargetExpr is called when production TargetExpr is exited.
+func (s *BaseMyGoListener) ExitTargetExpr(ctx *TargetExprContext) {}
+
 // EnterLogicalAndExpr is called when production LogicalAndExpr is entered.
 func (s *BaseMyGoListener) EnterLogicalAndExpr(ctx *LogicalAndExprContext) {}
 
@@ -523,6 +535,12 @@ func (s *BaseMyGoListener) EnterTupleExpr(ctx *TupleExprContext) {}
 
 // ExitTupleExpr is called when production TupleExpr is exited.
 func (s *BaseMyGoListener) ExitTupleExpr(ctx *TupleExprContext) {}
+
+// EnterPrefixExpr is called when production PrefixExpr is entered.
+func (s *BaseMyGoListener) EnterPrefixExpr(ctx *PrefixExprContext) {}
+
+// ExitPrefixExpr is called when production PrefixExpr is exited.
+func (s *BaseMyGoListener) ExitPrefixExpr(ctx *PrefixExprContext) {}
 
 // EnterLogicalOrExpr is called when production LogicalOrExpr is entered.
 func (s *BaseMyGoListener) EnterLogicalOrExpr(ctx *LogicalOrExprContext) {}

@@ -10,6 +10,11 @@ import (
 	"github.com/miea04/mygo/pkg/compiler/types"
 )
 
+const (
+	tryUnwrapPrefix       = "__MYGO_TRY_UNWRAP__"
+	tryUnwrapOptionPrefix = "__MYGO_TRY_UNWRAP_OPTION__"
+)
+
 func (v *MyGoTranspiler) applyImplicitPromotion(exprCode, fromType, toType string) string {
 	from := types.NormalizeTypeName(fromType)
 	to := types.NormalizeTypeName(toType)
@@ -39,103 +44,29 @@ func (v *MyGoTranspiler) VisitDerefExpr(ctx *ast.DerefExprContext) interface{} {
 
 func (v *MyGoTranspiler) VisitTryUnwrapExpr(ctx *ast.TryUnwrapExprContext) interface{} {
 	exprStr := ctx.Expr().Accept(v).(string)
-
-	// If there's a block or statement, we generate an inline function or similar structure.
-	// But TryUnwrapExpr is an expression, it must return a value.
-	// The syntax `val ?! return` implies `val` is returned if success, else `return` executes.
-	// This is tricky in Go because we can't easily embed statement in expression.
-	// Go approach:
-	// func() T { v, err := expr; if err != nil { return/panic }; return v }()
-	// But `return` inside closure only returns from closure.
-	// So `?! return` is control flow syntax, not just expression.
-	// However, in MyGo parser, it is under `expr`.
-	// If it's used as a statement: `let x = call() ?! return;`
-	// This is actually handled in VarDecl or Assignment if we want to be smart.
-	// But if we want it to work as expression:
-	// `call() ?! panic("err")` -> `_mygo_unwrap_or_panic(call(), func(err error){ panic("err") })`
-	// But `return` cannot be wrapped in func.
-
-	// RFC-002:
-	// let file = os.Open(...) ?! return;
-	// Transpiled:
-	// file, err := os.Open(...)
-	// if err != nil { return err }
-
-	// This requires context awareness. If `?!` is used in a Let/Assignment, we can split it.
-	// If it's used in nested expression `process(open() ?! return)`, we can't easily transpile to Go without major restructuring (lifting).
-	// For MVP Phase 3, maybe we restrict `?!` to be top-level in Let/Assignment or ExprStmt.
-
-	// Current implementation of `PanicUnwrapExpr` (?! in old grammar, ?!! in new) uses helper.
-	// New `?!` (TryUnwrap) allows custom block.
-
-	// Since we can't easily lift statements in this visitor pattern without rewrite,
-	// we might implement a limited version or use a special marker that `VisitSingleLetDecl` looks for.
-	// OR, we assume `?!` is only allowed where we can handle it.
-
-	// For now, let's implement `?!` (PanicUnwrap) style for `?!!` (already done above as VisitPanicUnwrapExpr).
-	// For `?! block`, we need to implement `VisitTryUnwrapExpr`.
-
-	// Wait, I am editing `expr.go` but `VisitTryUnwrapExpr` is not defined yet?
-	// It was added to grammar. I need to implement it.
-
-	// Implementation of TryUnwrapExpr logic:
-	// Since TryUnwrapExpr is an expression, we need to return something that represents value.
-	// But it has side effects (block/stmt execution).
-	// If this expression is part of a larger expression, we can't easily emit statement.
-	// We only support top-level usage in LetDecl or ExprStmt for now,
-	// OR we return a placeholder that will be processed by the parent statement visitor.
-	// However, the visitor pattern returns string.
-
-	// Strategy: Return a special marker string that parent (VisitSingleLetDecl) can parse?
-	// That's fragile.
-	// Better Strategy:
-	// Check if `ctx.Block()` or `ctx.Statement()` exists.
-	// If yes, generate the custom error handling code.
-	// If no, generate `return err` (default behavior).
-
-	// But `exprStr` is the call itself.
-	// If we are in `let x = foo() ?! { ... }`
-	// We want to generate:
-	// x, err := foo()
-	// if err != nil { ... }
-
-	// The `exprStr` returned here will be put into the `let` generation string.
-	// If we return `foo() ?! { ... }` (raw), the parent can parse it?
-	// Or we return a structured object? But interface{} is usually string.
-
-	// Let's use a special prefix marker for now, as seen in `VisitSingleLetDecl` checking for `?!`.
-	// `VisitSingleLetDecl` currently does: `if strings.Contains(exprGoCode, "?!") ...`
-	// This is very hacky and only supports the suffix `?!`.
-	// Now we have `?! block`.
-
-	// Let's construct a marker string that encodes the block content.
-	// Marker: `__MYGO_TRY_UNWRAP__<BaseExpr>__BLOCK__<BlockCode>__`
-	// This is ugly but fits the current string-based transpiler architecture without major refactor.
-
-	blockCode := ""
-	if ctx.Block() != nil {
-		blockCode = ctx.Block().Accept(v).(string)
-	} else if ctx.Statement() != nil {
-		blockCode = ctx.Statement().Accept(v).(string)
-	} else {
-		// Default: return err
-		blockCode = "return err"
+	exprType := types.InferExprType(ctx.Expr(), v.CurrentScope)
+	if code, ok := v.buildOptionTryUnwrap(exprStr, exprType); ok {
+		return code
 	}
 
-	// Clean up block code (remove braces if needed or ensure it's a block)
-	// Actually `VisitBlock` returns `{ ... }`. `VisitStatement` returns code.
-	// We want `if err != nil { <blockCode> }`
+	// RFC-011: ?! is now error propagation operator (like Rust's ?)
+	// It assumes the enclosing function returns a Result or error.
+	// We generate a block that returns the error, wrapped in Result.Err if needed.
+	// For Go compatibility (phase 1), we assume Result_Err is available or just return err.
+	// The stmt.go visitor will wrap this in `if err != nil { ... }`.
 
-	if ctx.Statement() != nil {
-		blockCode = "{\n\t" + blockCode + "\n}"
-	}
+	// Default propagation block
+	blockCode := "return Result_Err(err)"
 
-	return fmt.Sprintf("__MYGO_TRY_UNWRAP__%s__BLOCK__%s", exprStr, blockCode)
+	return fmt.Sprintf("%s%s__BLOCK__%s", tryUnwrapPrefix, exprStr, blockCode)
 }
 
 func (v *MyGoTranspiler) VisitPanicUnwrapExpr(ctx *ast.PanicUnwrapExprContext) interface{} {
 	exprStr := ctx.Expr().Accept(v).(string)
 	typ := types.InferExprType(ctx.Expr(), v.CurrentScope)
+	if code, ok := v.buildOptionPanicUnwrap(exprStr, typ); ok {
+		return code
+	}
 
 	baseType := types.SplitBaseType(typ)
 	sym := v.CurrentScope.ResolveQualified(baseType)
@@ -151,6 +82,31 @@ func (v *MyGoTranspiler) VisitPanicUnwrapExpr(ctx *ast.PanicUnwrapExprContext) i
 		return fmt.Sprintf("%s_unwrap%s(%s)", sym.GoName, typeArgs, exprStr)
 	}
 	return fmt.Sprintf("_mygo_must(%s)", exprStr)
+}
+
+func (v *MyGoTranspiler) buildOptionTryUnwrap(exprStr, exprType string) (string, bool) {
+	if !types.IsOptionType(exprType) {
+		return "", false
+	}
+	inner, ok := types.OptionInnerType(exprType)
+	if !ok || inner == "" {
+		return "", false
+	}
+	innerGoType := v.toGoType(inner)
+	blockCode := fmt.Sprintf("return Option_None[%s]{}", innerGoType)
+	return fmt.Sprintf("%s%s__INNER__%s__BLOCK__%s", tryUnwrapOptionPrefix, exprStr, innerGoType, blockCode), true
+}
+
+func (v *MyGoTranspiler) buildOptionPanicUnwrap(exprStr, exprType string) (string, bool) {
+	if !types.IsOptionType(exprType) {
+		return "", false
+	}
+	inner, ok := types.OptionInnerType(exprType)
+	if !ok || inner == "" {
+		return "", false
+	}
+	innerGoType := v.toGoType(inner)
+	return fmt.Sprintf("func() %s { switch __mygo_opt := any(%s).(type) { case Option_Some[%s]: return __mygo_opt.Item1; default: panic(\"panic unwrap on None\") } }()", innerGoType, exprStr, innerGoType), true
 }
 
 func (v *MyGoTranspiler) VisitTupleExpr(ctx *ast.TupleExprContext) interface{} {
@@ -203,6 +159,10 @@ func (v *MyGoTranspiler) VisitStructLiteralExpr(ctx *ast.StructLiteralExprContex
 		fieldName := allIDs[i].GetText()
 		if i < len(allExprs) {
 			exprCode := allExprs[i].Accept(v).(string)
+			if fieldType, fieldTag, ok := v.resolveStructFieldTypeAndTag(sym, typeArgs, fieldName); ok {
+				exprType := types.InferExprType(allExprs[i], v.CurrentScope)
+				exprCode = v.boxTaggedOptionalFieldExpr(exprCode, exprType, fieldType, fieldTag)
+			}
 			fields = append(fields, fmt.Sprintf("%s: %s", fieldName, exprCode))
 		}
 	}
@@ -290,6 +250,54 @@ func (v *MyGoTranspiler) VisitFuncCallExpr(ctx *ast.FuncCallExprContext) interfa
 		return fmt.Sprintf("make(%s, 0)", sliceType)
 	}
 
+	// Map creation: Map<K, V>(cap) or Map<K, V>()
+	if callee == "Map" {
+		typeArgsStr := types.ParseTypeArgs(ctx.TypeArgs())
+		// typeArgsStr usually comes as "[K, V]" from ParseTypeArgs if it was parsed as such
+		// But here it might be "<K, V>" from the source text if not normalized yet?
+		// types.ParseTypeArgs usually returns string representation.
+
+		// We need to parse K and V.
+		// If typeArgsStr is empty, it's an error (Maps need types).
+		if typeArgsStr == "" {
+			// Fallback or error?
+			// For now, assume map[string]interface{} or similar? No, strict.
+			// But maybe we can infer? For now let's just default to map[string]any if missing?
+			// No, safer to require explicit types for now.
+		}
+
+		// Helper to extract K, V from "[K, V]" or "<K, V>"
+		extractKV := func(s string) (string, string) {
+			s = strings.TrimPrefix(s, "<")
+			s = strings.TrimPrefix(s, "[")
+			s = strings.TrimSuffix(s, ">")
+			s = strings.TrimSuffix(s, "]")
+			parts := types.SplitTopLevelTypeArgs(s)
+			if len(parts) == 2 {
+				return parts[0], parts[1]
+			}
+			return "string", "interface{}" // Default
+		}
+
+		kType, vType := extractKV(typeArgsStr)
+		kType = v.toGoType(kType)
+		vType = v.toGoType(vType)
+
+		mapType := fmt.Sprintf("map[%s]%s", kType, vType)
+
+		var args []string
+		if ctx.ExprList() != nil {
+			for _, eCtx := range ctx.ExprList().(*ast.ExprListContext).AllExpr() {
+				args = append(args, eCtx.Accept(v).(string))
+			}
+		}
+
+		if len(args) > 0 {
+			return fmt.Sprintf("make(%s, %s)", mapType, args[0])
+		}
+		return fmt.Sprintf("make(%s)", mapType)
+	}
+
 	// Check if it's an enum variant constructor: Enum.Variant
 	parts := strings.Split(callee, ".")
 	// Check if it is a channel method call or slice method call
@@ -352,16 +360,19 @@ func (v *MyGoTranspiler) VisitFuncCallExpr(ctx *ast.FuncCallExprContext) interfa
 			typeArgs := types.ParseTypeArgs(ctx.TypeArgs())
 			// Basic type inference for Result
 			if typeArgs == "" && (enumSym.GoName == "result" || enumSym.GoName == "Result") {
-				if variantName == "Ok" && len(args) > 0 {
-					arg0 := ctx.ExprList().(*ast.ExprListContext).Expr(0)
-					argType := types.InferExprType(arg0, v.CurrentScope)
-					if argType != "unknown" {
-						typeArgs = "[" + argType + "]"
+				// Check if Result is generic
+				if len(enumSym.GenericParams) > 0 {
+					if variantName == "Ok" && len(args) > 0 {
+						arg0 := ctx.ExprList().(*ast.ExprListContext).Expr(0)
+						argType := types.InferExprType(arg0, v.CurrentScope)
+						if argType != "unknown" {
+							typeArgs = "[" + argType + "]"
+						}
+					} else if v.expectedType != "" && (strings.HasPrefix(v.expectedType, "result[") || strings.HasPrefix(v.expectedType, "Result[")) {
+						// Get from expected type
+						idx := strings.Index(v.expectedType, "[")
+						typeArgs = v.expectedType[idx:]
 					}
-				} else if v.expectedType != "" && (strings.HasPrefix(v.expectedType, "result[") || strings.HasPrefix(v.expectedType, "Result[")) {
-					// Get from expected type
-					idx := strings.Index(v.expectedType, "[")
-					typeArgs = v.expectedType[idx:]
 				}
 			}
 			return fmt.Sprintf("%s_%s%s{%s}", enumSym.GoName, variantName, typeArgs, strings.Join(structFields, ", "))
@@ -422,6 +433,10 @@ func (v *MyGoTranspiler) VisitMethodCallExpr(ctx *ast.MethodCallExprContext) int
 		return res
 	}
 
+	if res, ok := v.transpileMapMethod(obj, objType, method, sliceArgs); ok {
+		return res
+	}
+
 	// Channel operations
 	if types.IsChannelType(objType) {
 		if method == "read" {
@@ -476,9 +491,12 @@ func (v *MyGoTranspiler) VisitMethodCallExpr(ctx *ast.MethodCallExprContext) int
 		}
 		// If still missing and it's Result, try to infer from args
 		if typeArgs == "" && enumSym.GoName == "Result" && len(args) > 0 {
-			argType := types.InferExprType(ctx.ExprList().(*ast.ExprListContext).Expr(0), v.CurrentScope)
-			if argType != "unknown" {
-				typeArgs = "[" + argType + "]"
+			// Check if Result is generic
+			if len(enumSym.GenericParams) > 0 {
+				argType := types.InferExprType(ctx.ExprList().(*ast.ExprListContext).Expr(0), v.CurrentScope)
+				if argType != "unknown" {
+					typeArgs = "[" + argType + "]"
+				}
 			}
 		}
 
@@ -743,7 +761,19 @@ func (v *MyGoTranspiler) VisitFloatExpr(ctx *ast.FloatExprContext) interface{} {
 	return ctx.FLOAT().GetText()
 }
 func (v *MyGoTranspiler) VisitIdentifierExpr(ctx *ast.IdentifierExprContext) interface{} {
-	return ctx.QualifiedName().GetText()
+	qn := ctx.QualifiedName()
+	ids := qn.AllID()
+
+	if len(ids) == 2 {
+		first := ids[0].GetText()
+		second := ids[1].GetText()
+		sym := v.CurrentScope.Resolve(first)
+		if sym != nil && sym.Kind == symbols.KindEnum {
+			return fmt.Sprintf("%s_%s{}", sym.GoName, second)
+		}
+	}
+
+	return qn.GetText()
 }
 
 func (v *MyGoTranspiler) VisitNilExpr(ctx *ast.NilExprContext) interface{} {
@@ -856,6 +886,31 @@ func (v *MyGoTranspiler) transpileSliceMethod(obj, objType, method string, slice
 	case "clone":
 		v.AddImport("slices")
 		return fmt.Sprintf("slices.Clone(%s)", obj), true
+	}
+	return "", false
+}
+
+func (v *MyGoTranspiler) transpileMapMethod(obj, objType, method string, args []string) (string, bool) {
+	if !strings.HasPrefix(objType, "Map<") && !strings.HasPrefix(objType, "map[") {
+		return "", false
+	}
+
+	kType, vType := types.ExtractCollectionTypes(objType, v.CurrentScope)
+	goKType := v.toGoType(kType)
+	goVType := v.toGoType(vType)
+
+	switch method {
+	case "keys":
+		// keys() -> func(m map[K]V) []K { keys := make([]K, 0, len(m)); for k := range m { keys = append(keys, k) }; return keys }(obj)
+		return fmt.Sprintf("func(m map[%s]%s) []%s { keys := make([]%s, 0, len(m)); for k := range m { keys = append(keys, k) }; return keys }(%s)", goKType, goVType, goKType, goKType, obj), true
+	case "values":
+		// values() -> func(m map[K]V) []V { values := make([]V, 0, len(m)); for _, v := range m { values = append(values, v) }; return values }(obj)
+		return fmt.Sprintf("func(m map[%s]%s) []%s { values := make([]%s, 0, len(m)); for _, v := range m { values = append(values, v) }; return values }(%s)", goKType, goVType, goVType, goVType, obj), true
+	case "has":
+		if len(args) == 1 {
+			// has(key) -> func(m map[K]V, k K) bool { _, ok := m[k]; return ok }(obj, key)
+			return fmt.Sprintf("func(m map[%s]%s, k %s) bool { _, ok := m[k]; return ok }(%s, %s)", goKType, goVType, goKType, obj, args[0]), true
+		}
 	}
 	return "", false
 }

@@ -39,7 +39,8 @@ func (s *Scope) DefineWithMeta(mygoName, goName string, kind SymbolKind, typeStr
 		ConcreteTraitMethods: make(map[string]interface{}),
 		Methods:              make(map[string]interface{}),
 		Variants:             make(map[string]*Symbol),
-		Fields:               make(map[string]string),
+		Fields:               []FieldSymbol{},
+		FieldMap:             make(map[string]*FieldSymbol),
 		BoundTraits:          make(map[string]struct{}),
 	}
 	s.Symbols[mygoName] = sym

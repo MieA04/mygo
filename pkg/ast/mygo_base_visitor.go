@@ -155,11 +155,15 @@ func (v *BaseMyGoVisitor) VisitTraitBodyItem(ctx *TraitBodyItemContext) interfac
 	return v.VisitChildren(ctx)
 }
 
-func (v *BaseMyGoVisitor) VisitSpecificBan(ctx *SpecificBanContext) interface{} {
+func (v *BaseMyGoVisitor) VisitBanDirective(ctx *BanDirectiveContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
-func (v *BaseMyGoVisitor) VisitRepeatBan(ctx *RepeatBanContext) interface{} {
+func (v *BaseMyGoVisitor) VisitFlipBanDirective(ctx *FlipBanDirectiveContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseMyGoVisitor) VisitFlipBanItem(ctx *FlipBanItemContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
@@ -275,6 +279,10 @@ func (v *BaseMyGoVisitor) VisitDerefExpr(ctx *DerefExprContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BaseMyGoVisitor) VisitTargetExpr(ctx *TargetExprContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BaseMyGoVisitor) VisitLogicalAndExpr(ctx *LogicalAndExprContext) interface{} {
 	return v.VisitChildren(ctx)
 }
@@ -340,6 +348,10 @@ func (v *BaseMyGoVisitor) VisitPanicUnwrapExpr(ctx *PanicUnwrapExprContext) inte
 }
 
 func (v *BaseMyGoVisitor) VisitTupleExpr(ctx *TupleExprContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BaseMyGoVisitor) VisitPrefixExpr(ctx *PrefixExprContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 

@@ -52,6 +52,8 @@ To rapidly validate new Trait system syntax and explore a statically typed progr
 
 - **Enhanced Generics**: Supports `where` clause constraints.
 - **Trait System**: Flexible behavior composition, supporting `trait bind`.
+- **Modern Error Handling**: Introduces `?!` (Error Propagation) and `?!!` (Panic-Unwrap) operators, providing explicit and efficient error management based on the `Result<T, E>` type.
+- **Optional Types**: Supports `T?` syntax normalized to `Option<T>`, including Option-aware `?!` / `?!!` flows.
 - **Algebraic Data Types**: Supports `enum` with data (Tagged Unions) and pattern matching (`match`).
 - **Modern Syntax**: Removes some Go boilerplate and introduces cleaner control flow.
 - **Annotations & Metaprogramming**: Supports `@Derive`, `@macro` and compile-time code generation.
@@ -76,6 +78,19 @@ MyGo uses `let` and `const` for variable declarations, and `fn` for functions.
 fn add(a: int, b: int): int {
     let result = a + b;
     return result;
+}
+```
+
+### Error Handling
+
+MyGo adopts a modern error handling mechanism similar to Rust, using the `?!` operator for error propagation.
+
+```mygo
+fn readFile(path: string): Result<string, error> {
+    // If openFile fails, return the error immediately
+    let f = os.Open(path) ?!;
+    let content = io.ReadAll(f) ?!;
+    return Result.Ok(content);
 }
 ```
 
@@ -182,6 +197,15 @@ MyGo is designed to be fully compatible with the Go ecosystem:
    ./mygo.exe --help
    # Or run directly to see default demo
    ./mygo.exe
+   ```
+
+4. Cross-compile (common release targets):
+   ```bash
+   # Windows
+   go build -o mygo.exe ./cmd/mygo
+
+   # Linux amd64
+   GOOS=linux GOARCH=amd64 go build -o mygo-linux-amd64 ./cmd/mygo
    ```
 
 ## Quick Start

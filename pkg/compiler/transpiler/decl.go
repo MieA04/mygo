@@ -2,10 +2,10 @@ package transpiler
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/miea04/mygo/pkg/ast"
+	"github.com/miea04/mygo/pkg/compiler/interpreter"
 	"github.com/miea04/mygo/pkg/compiler/symbols"
 	"github.com/miea04/mygo/pkg/compiler/types"
 )
@@ -107,7 +107,6 @@ func (v *MyGoTranspiler) VisitStructDecl(ctx *ast.StructDeclContext) interface{}
 		// Add to symbol
 		ann := &symbols.Annotation{Name: annName, Args: args}
 		sym.Annotations = append(sym.Annotations, ann)
-		// v.CurrentScope.AddAnnotation(annName, sym) // Removed to avoid duplication with Collector
 
 		if annName == "Derive" {
 			for _, arg := range args {
@@ -117,7 +116,6 @@ func (v *MyGoTranspiler) VisitStructDecl(ctx *ast.StructDeclContext) interface{}
 				}
 			}
 		} else if annName == "Builder" {
-			// Phase 1: Support @Builder marker, implementation later if needed
 			activeAnnotations = append(activeAnnotations, "Builder")
 		}
 	}
@@ -126,8 +124,6 @@ func (v *MyGoTranspiler) VisitStructDecl(ctx *ast.StructDeclContext) interface{}
 	v.CurrentProcessingStruct = structName
 	defer func() {
 		v.CurrentProcessingStruct = ""
-		// v.CurrentStructAnnotations is kept for global access if needed, or clear it?
-		// RFC says find_all_annotated_with, so we should keep it.
 	}()
 
 	defParams, _ := types.ParseTypeParams(ctx.TypeParams(), v.CurrentScope)
@@ -136,529 +132,220 @@ func (v *MyGoTranspiler) VisitStructDecl(ctx *ast.StructDeclContext) interface{}
 	}
 	var fields []string
 	for _, fCtx := range ctx.AllStructField() {
-		fields = append(fields, "\t"+fCtx.Accept(v).(string))
-	}
-
-	// RFC-007: Generate Builder if @Builder is present
-	// For Phase 1, we just return the struct.
-
-	return fmt.Sprintf("type %s%s struct {\n%s\n}", goStructName, defParams, strings.Join(fields, "\n"))
-}
-
-func (v *MyGoTranspiler) VisitPureTraitDecl(ctx *ast.PureTraitDeclContext) interface{} {
-	traitName := types.FormatVisibility(ctx.ID().GetText(), ctx.Modifier())
-	defParams, _ := types.ParseTypeParams(ctx.TypeParams(), v.CurrentScope)
-	if sym := v.CurrentScope.Resolve(ctx.ID().GetText()); sym != nil && len(sym.GenericParams) > 0 {
-		defParams, _ = types.ParseGenericParamMeta(sym.GenericParams)
-	}
-
-	var methods []string
-	for _, fnCtx := range ctx.AllTraitFnDecl() {
-		methods = append(methods, fnCtx.Accept(v).(string))
-	}
-
-	return fmt.Sprintf("type %s%s interface {\n%s\n}", traitName, defParams, strings.Join(methods, "\n"))
-}
-
-func (v *MyGoTranspiler) VisitTraitFnDecl(ctx *ast.TraitFnDeclContext) interface{} {
-	fnName := ctx.ID().GetText()
-	goFnName := fnName // Use name directly to support Go-style visibility (Upper=Public, Lower=Private)
-
-	var params []string
-	if ctx.ParamList() != nil {
-		for _, pCtx := range ctx.ParamList().(*ast.ParamListContext).AllParam() {
-			p := pCtx.(*ast.ParamContext)
-			pName := p.ID().GetText()
-			pType := v.resolveType(p.TypeType())
-			params = append(params, fmt.Sprintf("%s %s", pName, pType))
-		}
-	}
-
-	returnTypeStr := ""
-	if ctx.TypeType() != nil {
-		returnTypeStr = " " + v.resolveType(ctx.TypeType())
-	}
-
-	// If we are in a bind block and have a block, generate a full Go method
-	if v.currentImplType != "" && ctx.Block() != nil {
-		v.pushScope("trait_fn_" + fnName)
-		defer v.popScope()
-
-		// Re-define params in scope for the block
-		if ctx.ParamList() != nil {
-			for _, pCtx := range ctx.ParamList().(*ast.ParamListContext).AllParam() {
-				p := pCtx.(*ast.ParamContext)
-				pName := p.ID().GetText()
-				pType := v.resolveType(p.TypeType())
-				v.CurrentScope.Define(pName, pName, symbols.KindVar, pType)
+		if fc, ok := fCtx.(*ast.StructFieldContext); ok {
+			res := v.VisitStructField(fc)
+			if s, ok := res.(string); ok {
+				fields = append(fields, "\t"+s)
 			}
 		}
-
-		// Handle bound instance
-		receiverStr := ""
-		if v.currentBindVar != "" {
-			v.CurrentScope.Define(v.currentBindVar, v.currentBindVar, symbols.KindVar, v.currentImplType)
-			if v.currentImplSymbol != nil && v.currentImplSymbol.Kind == symbols.KindStruct {
-				receiverStr = fmt.Sprintf("(%s *%s) ", v.currentBindVar, v.currentImplType)
-			} else {
-				instanceParam := fmt.Sprintf("%s %s", v.currentBindVar, v.currentImplType)
-				params = append([]string{instanceParam}, params...)
-			}
-		}
-
-		blockStr := ctx.Block().Accept(v).(string)
-		defParams, _ := types.ParseTypeParams(ctx.TypeParams(), v.CurrentScope)
-		// Removed incorrect appending of bind generics to method generics
-		// if v.currentBindTypeDef != "" { ... }
-
-		if receiverStr != "" {
-			return fmt.Sprintf("func %s%s%s(%s)%s %s", receiverStr, goFnName, defParams, strings.Join(params, ", "), returnTypeStr, blockStr)
-		}
-		return fmt.Sprintf("func %s%s(%s)%s %s", goFnName, defParams, strings.Join(params, ", "), returnTypeStr, blockStr)
 	}
 
-	// Otherwise, it's an interface method signature
-	return fmt.Sprintf("\t%s(%s)%s", goFnName, strings.Join(params, ", "), returnTypeStr)
+	// RFC-008: Execute Macros
+	var macroOutputs []string
+	for _, annCtx := range ctx.AllAnnotationUsage() {
+		annName := annCtx.ID().GetText()
+
+		// Handle @Derive(MacroName)
+		if annName == "Derive" && annCtx.ExprList() != nil {
+			for _, expr := range annCtx.ExprList().(*ast.ExprListContext).AllExpr() {
+				macroName := expr.GetText()
+
+				targetMacroName := "Derive" + macroName
+				macroSym := v.CurrentScope.Resolve(targetMacroName)
+
+				// DEBUG
+				kind := "nil"
+				if macroSym != nil {
+					kind = string(macroSym.Kind)
+				}
+				fmt.Printf("DEBUG: Derive check: %s -> %s found=%v kind=%s\n", macroName, targetMacroName, macroSym != nil, kind)
+
+				if macroSym != nil && macroSym.Kind == symbols.KindAnnotation { // Annotation/Macro
+					// Found macro!
+					// Execute it
+					if macroNode, ok := macroSym.ASTNode.(*ast.AnnotationDeclContext); ok {
+						interp := interpreter.NewInterpreter(v.CurrentScope)
+						// Create target meta
+						targetMeta := interp.CreateSymbolMeta(sym)
+						interp.Env.Set("target", targetMeta)
+
+						// Execute Block
+						res := interp.VisitBlock(macroNode.Block().(*ast.BlockContext))
+						if ret, ok := res.(interpreter.ReturnValue); ok {
+							if strVal, ok := ret.Val.(interpreter.StringValue); ok {
+								goCode := v.transpileMacroResult(strVal.Val)
+								macroOutputs = append(macroOutputs, goCode)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return fmt.Sprintf("type %s%s struct {\n%s\n}\n\n%s", goStructName, defParams, strings.Join(fields, "\n"), strings.Join(macroOutputs, "\n\n"))
 }
 
 func (v *MyGoTranspiler) VisitStructField(ctx *ast.StructFieldContext) interface{} {
 	fieldName := ctx.ID().GetText()
-	fieldType := v.resolveType(ctx.TypeType())
+	fieldType := types.ResolveTypeWithScope(ctx.TypeType().GetText(), v.CurrentScope)
+	typeName := v.toGoType(fieldType)
 
-	// RFC-007: Check for @Derive(Json)
-	var tags []string
-	if v.CurrentProcessingStruct != "" {
-		annotations := v.CurrentStructAnnotations[v.CurrentProcessingStruct]
-		for _, ann := range annotations {
-			if ann == "Json" {
-				// Use field name as json tag
-				tags = append(tags, fmt.Sprintf("json:\"%s\"", fieldName))
+	tag := ""
+	rawTag := ""
+	if ctx.STRING() != nil {
+		rawTag = ctx.STRING().GetText()
+		tag = " " + rawTag
+	}
+	if specializedType, ok := v.specializedTaggedOptionalFieldGoType(fieldType, rawTag); ok {
+		typeName = specializedType
+	}
+
+	return fmt.Sprintf("%s %s%s", fieldName, typeName, tag)
+}
+
+func (v *MyGoTranspiler) VisitPureTraitDecl(ctx *ast.PureTraitDeclContext) interface{} {
+	traitName := ctx.ID().GetText()
+	goTraitName := types.FormatVisibility(traitName, ctx.Modifier())
+
+	defParams, _ := types.ParseTypeParams(ctx.TypeParams(), v.CurrentScope)
+	if sym := v.CurrentScope.Resolve(traitName); sym != nil && len(sym.GenericParams) > 0 {
+		defParams, _ = types.ParseGenericParamMeta(sym.GenericParams)
+	}
+
+	var methods []string
+	for _, fn := range ctx.AllTraitFnDecl() {
+		fnName := fn.ID().GetText()
+
+		// Parse params
+		var params []string
+		if fn.ParamList() != nil {
+			for _, p := range fn.ParamList().(*ast.ParamListContext).AllParam() {
+				// name := p.ID().GetText()
+				typ := v.resolveType(p.TypeType())
+				params = append(params, typ)
 			}
 		}
+
+		// Parse return type
+		retType := ""
+		if fn.TypeType() != nil {
+			retType = v.resolveType(fn.TypeType())
+		}
+
+		sig := fmt.Sprintf("%s(%s)", fnName, strings.Join(params, ", "))
+		if retType != "" {
+			sig += " " + retType
+		}
+		methods = append(methods, "\t"+sig)
 	}
 
-	tagStr := ""
-	if len(tags) > 0 {
-		tagStr = fmt.Sprintf(" `%s`", strings.Join(tags, " "))
-	}
-
-	return fmt.Sprintf("%s %s%s", fieldName, fieldType, tagStr)
+	return fmt.Sprintf("type %s%s interface {\n%s\n}\n", goTraitName, defParams, strings.Join(methods, "\n"))
 }
 
 func (v *MyGoTranspiler) VisitBindTraitDecl(ctx *ast.BindTraitDeclContext) interface{} {
-	var sb strings.Builder
-	bindTypeParams := types.ExtractGenericParamMeta(ctx.TypeParams(), v.CurrentScope)
-	whereMeta := types.ExtractWhereConstraintMeta(ctx.WhereClause(), v.CurrentScope)
-	mergedMeta, _ := types.MergeGenericConstraints(bindTypeParams, whereMeta)
-	v.currentBindTypeDef, _ = types.ParseGenericParamMeta(mergedMeta)
-	for _, targetCtx := range ctx.AllBindTarget() {
-		tCtx := targetCtx.TypeType()
-		if tCtx == nil {
-			continue
-		}
-		targetType := v.resolveType(tCtx)
-		v.currentImplType = targetType
-		baseName := types.SplitBaseType(tCtx.GetText())
-		v.currentImplSymbol = v.CurrentScope.Resolve(baseName)
-		if v.currentImplSymbol == nil {
-			v.currentImplSymbol = v.CurrentScope.ResolveByGoName(baseName)
-		}
-		v.currentBindVar = "this"
-		if targetCtx.ID() != nil {
-			v.currentBindVar = targetCtx.ID().GetText()
-		}
-
-		methods, unresolvedConflicts := v.collectBindMethods(ctx)
-		if len(unresolvedConflicts) > 0 {
-			fmt.Printf("Compile Error: Type '%s' has unresolved trait method conflicts: %s\n", targetType, strings.Join(unresolvedConflicts, ", "))
-		}
-		for _, fnDecl := range methods {
-			sb.WriteString(fnDecl.Accept(v).(string) + "\n")
+	// Collect directives
+	for _, item := range ctx.AllTraitBodyItem() {
+		if item.CompositionDirective() != nil {
+			// Process ban/flip ban
+			_ = item.CompositionDirective().Accept(v)
 		}
 	}
-
-	v.currentImplType = ""
-	v.currentBindVar = ""
-	v.currentImplSymbol = nil
-	v.currentBindTypeDef = ""
-	return sb.String()
+	return "" // TODO: Implement bind trait logic correctly
 }
 
-func (v *MyGoTranspiler) collectBindMethods(ctx *ast.BindTraitDeclContext) ([]*ast.TraitFnDeclContext, []string) {
-	explicit := make(map[string]*ast.TraitFnDeclContext)
-	var explicitOrder []string
-	for _, item := range ctx.AllTraitBodyItem() {
-		if fnCtx := item.TraitFnDecl(); fnCtx != nil {
-			fnDecl := fnCtx.(*ast.TraitFnDeclContext)
-			if fnDecl.Block() == nil {
-				continue
-			}
-			name := fnDecl.ID().GetText()
-			if _, ok := explicit[name]; !ok {
-				explicitOrder = append(explicitOrder, name)
-			}
-			explicit[name] = fnDecl
-		}
-	}
-
-	mixed := make(map[string]*ast.TraitFnDeclContext)
-	conflicts := make(map[string]struct{})
-	for _, traitSym := range v.resolveCombsTraits(ctx) {
-		var names []string
-		for name := range traitSym.ConcreteTraitMethods {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		for _, name := range names {
-			if _, exists := mixed[name]; exists {
-				conflicts[name] = struct{}{}
-				continue
-			}
-			if fnDecl, ok := traitSym.ConcreteTraitMethods[name].(*ast.TraitFnDeclContext); ok && fnDecl.Block() != nil {
-				mixed[name] = fnDecl
-			}
-		}
-	}
-
-	for _, item := range ctx.AllTraitBodyItem() {
-		banCtx := item.BanDirective()
-		if banCtx == nil {
-			continue
-		}
-		switch directive := banCtx.(type) {
-		case *ast.SpecificBanContext:
-			text := directive.GetText()
-			if strings.HasPrefix(text, "flipban[") {
-				keep := make(map[string]struct{})
-				for _, id := range directive.AllID() {
-					keep[id.GetText()] = struct{}{}
-				}
-				for name := range mixed {
-					if _, ok := keep[name]; ok {
-						continue
-					}
-					delete(mixed, name)
-					delete(conflicts, name)
-				}
-				for name := range conflicts {
-					if _, ok := keep[name]; !ok {
-						delete(conflicts, name)
-					}
-				}
-				continue
-			}
-			for _, id := range directive.AllID() {
-				name := id.GetText()
-				delete(mixed, name)
-				delete(conflicts, name)
-			}
-		case *ast.RepeatBanContext:
-			for name := range conflicts {
-				delete(mixed, name)
-			}
-			conflicts = make(map[string]struct{})
-		}
-	}
-
-	for name := range conflicts {
-		if _, ok := explicit[name]; ok {
-			delete(conflicts, name)
-			continue
-		}
-		delete(mixed, name)
-	}
-
-	var results []*ast.TraitFnDeclContext
-	for _, name := range explicitOrder {
-		results = append(results, explicit[name])
-	}
-	var mixedNames []string
-	for name := range mixed {
-		mixedNames = append(mixedNames, name)
-	}
-	sort.Strings(mixedNames)
-	for _, name := range mixedNames {
-		if _, ok := explicit[name]; ok {
-			continue
-		}
-		results = append(results, mixed[name])
-	}
-	var unresolved []string
-	for name := range conflicts {
-		unresolved = append(unresolved, name)
-	}
-	sort.Strings(unresolved)
-	return results, unresolved
-}
-
-func (v *MyGoTranspiler) resolveCombsTraits(ctx *ast.BindTraitDeclContext) []*symbols.Symbol {
-	var traits []*symbols.Symbol
-	seen := make(map[string]struct{})
+func (v *MyGoTranspiler) VisitBanDirective(ctx *ast.BanDirectiveContext) interface{} {
+	var methods []string
 	for _, id := range ctx.AllID() {
-		traitName := id.GetText()
-		traitSym := v.CurrentScope.Resolve(traitName)
-		if traitSym == nil || traitSym.Kind != symbols.KindTrait {
-			continue
-		}
-		if _, ok := seen[traitSym.MyGoName]; ok {
-			continue
-		}
-		seen[traitSym.MyGoName] = struct{}{}
-		traits = append(traits, traitSym)
+		methods = append(methods, id.GetText())
 	}
-	return traits
+	return methods
+}
+
+type FlipBanItem struct {
+	Method string
+	Trait  string
+}
+
+func (v *MyGoTranspiler) VisitFlipBanDirective(ctx *ast.FlipBanDirectiveContext) interface{} {
+	var items []FlipBanItem
+	for _, itemCtx := range ctx.AllFlipBanItem() {
+		if item, ok := itemCtx.Accept(v).(FlipBanItem); ok {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+func (v *MyGoTranspiler) VisitFlipBanItem(ctx *ast.FlipBanItemContext) interface{} {
+	ids := ctx.AllID()
+	if len(ids) == 2 {
+		return FlipBanItem{
+			Method: ids[0].GetText(),
+			Trait:  ids[1].GetText(),
+		}
+	}
+	return nil
 }
 
 func (v *MyGoTranspiler) VisitFnDecl(ctx *ast.FnDeclContext) interface{} {
 	fnName := ctx.ID().GetText()
 
-	// RFC-007: Handle @Init
-	if v.currentImplType == "" {
-		for _, annCtx := range ctx.AllAnnotationUsage() {
-			if annCtx.ID().GetText() == "Init" {
-				goFnName := types.FormatVisibility(fnName, ctx.Modifier())
-				v.InitFunctions = append(v.InitFunctions, goFnName)
+	oldFnName := v.CurrentOriginalFnName
+	v.CurrentOriginalFnName = fnName
+	defer func() { v.CurrentOriginalFnName = oldFnName }()
+
+	var params []string
+	var receiver string
+	if ctx.ParamList() != nil {
+		for i, p := range ctx.ParamList().(*ast.ParamListContext).AllParam() {
+			pName := p.ID().GetText()
+			pType := v.resolveType(p.TypeType())
+
+			if i == 0 && (pName == "self" || pName == "this") {
+				// It's a method!
+				receiver = fmt.Sprintf("(%s %s)", pName, pType)
+			} else {
+				params = append(params, fmt.Sprintf("%s %s", pName, pType))
 			}
 		}
 	}
 
-	// RFC-007: Check for custom macros (Phase 2)
-	var macroName string
-	if v.currentImplType == "" {
-		for _, annCtx := range ctx.AllAnnotationUsage() {
-			annName := annCtx.ID().GetText()
-			if annName != "Init" && annName != "Derive" && annName != "Builder" {
-				macroName = annName
-				break
-			}
-		}
-	}
-
-	if macroName != "" {
-		origName := "_mygo_orig_" + fnName
-		origCode := v.transpileFnDecl(ctx, origName)
-
-		wrapperBody := v.executeMacro(macroName, ctx)
-		if wrapperBody == "" {
-			return v.transpileFnDecl(ctx, "")
-		}
-
-		v.CurrentOriginalFnName = origName
-		wrapperBodyGo := v.transpileMacroResult(wrapperBody)
-		v.CurrentOriginalFnName = ""
-
-		dummyCode := v.transpileFnDecl(ctx, "")
-		idx := strings.Index(dummyCode, "{")
-		if idx != -1 {
-			sig := dummyCode[:idx]
-			return origCode + "\n\n" + sig + " {\n" + wrapperBodyGo + "\n}"
-		}
-	}
-
-	return v.transpileFnDecl(ctx, "")
-}
-
-func (v *MyGoTranspiler) transpileFnDecl(ctx *ast.FnDeclContext, overrideName string) string {
-	fnName := ctx.ID().GetText()
-	goFnName := types.FormatVisibility(fnName, ctx.Modifier())
-	if overrideName != "" {
-		goFnName = overrideName
-	}
-
-	// RFC-007: Handle @Init logic is now inside transpiler.InitFunctions collection
-	// We don't need to change generation logic here, just collecting.
-	// But VisitFnDecl is called recursively? No, it's called by VisitStatement.
-	// The collection happens in VisitFnDecl (the wrapper one).
-	// Since we delegate to transpileFnDecl, we should move the collection logic here or keep it in VisitFnDecl?
-	// The original VisitFnDecl had collection logic.
-	// We should keep it. But if we call transpileFnDecl twice (dummy call), we might double collect?
-	// Yes.
-	// So collection should be in VisitFnDecl, BEFORE calling transpileFnDecl.
-	// But transpileFnDecl is the one generating code.
-	// Collection relies on AnnotationUsage.
-	// Let's keep collection in VisitFnDecl (the wrapper).
-	// Wait, if we use transpileFnDecl for original code, we don't want to collect Init again.
-	// So transpileFnDecl should NOT collect Init.
-
-	defParams, _ := types.ParseTypeParams(ctx.TypeParams(), v.CurrentScope)
-	if sym := v.CurrentScope.Resolve(fnName); sym != nil && len(sym.GenericParams) > 0 {
-		defParams, _ = types.ParseGenericParamMeta(sym.GenericParams)
+	retType := ""
+	if ctx.TypeType() != nil {
+		retType = v.resolveType(ctx.TypeType())
 	}
 
 	v.pushScope("fn_" + fnName)
-
-	isMethod := v.currentImplType != ""
-	receiverStr := ""
-
-	var isStructMethod bool
-
-	_, implTypeParamsStr := types.InferImplTypeParamDefs(v.currentImplType, v.Scope)
-	if v.currentBindTypeDef != "" {
-		implTypeParamsStr = v.currentBindTypeDef
-	}
-
-	if isMethod && v.currentImplSymbol != nil {
-		if v.currentImplSymbol.Kind == symbols.KindEnum {
-			// Enum methods are standalone functions
-			goFnName = fmt.Sprintf("%s_%s", v.currentImplSymbol.GoName, fnName)
-			if overrideName != "" {
-				goFnName = overrideName // Override takes precedence
-			}
-		} else if v.currentImplSymbol.Kind == symbols.KindStruct {
-			// Struct methods use receiver
-			isStructMethod = true
-		}
-	}
-
-	// Merge generic params for non-struct methods (e.g. Enum standalone functions)
-	if implTypeParamsStr != "" && !isStructMethod {
-		if defParams == "" {
-			defParams = implTypeParamsStr
-		} else {
-			p1 := implTypeParamsStr[1 : len(implTypeParamsStr)-1]
-			p2 := defParams[1 : len(defParams)-1]
-			defParams = "[" + p1 + ", " + p2 + "]"
-		}
-	}
-
-	var params []string
 	if ctx.ParamList() != nil {
-		for _, pCtx := range ctx.ParamList().(*ast.ParamListContext).AllParam() {
-			p := pCtx.(*ast.ParamContext)
+		for _, p := range ctx.ParamList().(*ast.ParamListContext).AllParam() {
 			pName := p.ID().GetText()
-			pType := v.resolveType(p.TypeType())
-			params = append(params, fmt.Sprintf("%s %s", pName, pType))
-			v.CurrentScope.Define(pName, pName, symbols.KindVar, pType)
+			v.CurrentScope.Define(pName, pName, symbols.KindVar, "unknown")
 		}
 	}
 
-	// Inject bound instance
-	if v.currentBindVar != "" && v.currentImplType != "" {
-		// Define instance in scope
-		v.CurrentScope.Define(v.currentBindVar, v.currentBindVar, symbols.KindVar, v.currentImplType)
-
-		if isStructMethod {
-			// Receiver for Struct (Always use pointer receiver for mutable semantics)
-			receiverStr = fmt.Sprintf("(%s *%s) ", v.currentBindVar, v.currentImplType)
-		} else {
-			// First parameter for Enum (or others)
-			instanceParam := fmt.Sprintf("%s %s", v.currentBindVar, v.currentImplType)
-			params = append([]string{instanceParam}, params...)
+	body := ""
+	if ctx.Block() != nil {
+		if b, ok := ctx.Block().(*ast.BlockContext); ok {
+			res := v.VisitBlock(b)
+			if s, ok := res.(string); ok {
+				body = s
+			}
 		}
 	}
 
-	returnTypeStr := ""
-	if ctx.TypeType() != nil {
-		returnTypeStr = " " + v.resolveType(ctx.TypeType())
-	}
-	blockStr := ctx.Block().Accept(v).(string)
 	v.popScope()
 
-	// Helper to handle receiver placement
-	if receiverStr != "" {
-		return fmt.Sprintf("func %s%s%s(%s)%s %s", receiverStr, goFnName, defParams, strings.Join(params, ", "), returnTypeStr, blockStr)
-	}
-	return fmt.Sprintf("func %s%s(%s)%s %s", goFnName, defParams, strings.Join(params, ", "), returnTypeStr, blockStr)
-}
-
-func (v *MyGoTranspiler) VisitSingleLetDecl(ctx *ast.SingleLetDeclContext) interface{} {
-	varName := types.FormatVisibility(ctx.ID().GetText(), ctx.Modifier())
-
-	declaredType := ""
-	if ctx.TypeType() != nil {
-		declaredType = v.resolveType(ctx.TypeType())
+	sig := ""
+	if receiver != "" {
+		sig = fmt.Sprintf("func %s %s(%s)", receiver, fnName, strings.Join(params, ", "))
+	} else {
+		sig = fmt.Sprintf("func %s(%s)", fnName, strings.Join(params, ", "))
 	}
 
-	oldExpected := v.expectedType
-	defer func() { v.expectedType = oldExpected }()
-	v.expectedType = declaredType
-
-	inferredType := "unknown"
-	if declaredType != "" {
-		inferredType = declaredType
-	} else if ctx.Expr() != nil {
-		inferredType = types.InferExprType(ctx.Expr(), v.CurrentScope)
+	if retType != "" {
+		sig += " " + retType
 	}
 
-	v.CurrentScope.Define(ctx.ID().GetText(), varName, symbols.KindVar, inferredType)
-
-	if ctx.Expr() != nil {
-		exprGoCode := ctx.Expr().Accept(v).(string)
-		exprType := types.InferExprType(ctx.Expr(), v.CurrentScope)
-		if declaredType != "" {
-			exprGoCode = v.applyImplicitPromotion(exprGoCode, exprType, declaredType)
-		}
-
-		if strings.Contains(exprGoCode, "?!") || strings.HasPrefix(exprGoCode, "__MYGO_TRY_UNWRAP__") {
-			var cleanCall, blockCode string
-			if strings.HasPrefix(exprGoCode, "__MYGO_TRY_UNWRAP__") {
-				parts := strings.Split(exprGoCode, "__BLOCK__")
-				if len(parts) == 2 {
-					cleanCall = strings.TrimPrefix(parts[0], "__MYGO_TRY_UNWRAP__")
-					blockCode = parts[1]
-				} else {
-					cleanCall = exprGoCode // fallback
-					blockCode = "return err"
-				}
-			} else {
-				cleanCall = strings.ReplaceAll(exprGoCode, "?!", "")
-				blockCode = "return err"
-			}
-
-			// Clean up block code: remove outer braces if they exist to check content,
-			// but we need them for the if body. `VisitBlock` returns braces.
-			// `blockCode` is expected to be `{ ... }` or single statement.
-
-			// If blockCode is single statement like "return err", wrap it.
-			if !strings.HasPrefix(strings.TrimSpace(blockCode), "{") {
-				blockCode = fmt.Sprintf("{\n\t%s\n}", blockCode)
-			}
-
-			if declaredType == "" {
-				return fmt.Sprintf("_tmp, err := %s\nif err != nil %s\n%s := _tmp", cleanCall, blockCode, varName)
-			}
-			return fmt.Sprintf("_tmp, err := %s\nif err != nil %s\nvar %s %s = _tmp", cleanCall, blockCode, varName, declaredType)
-		}
-
-		if declaredType == "" {
-			return fmt.Sprintf("%s := %s", varName, exprGoCode)
-		}
-		return fmt.Sprintf("var %s %s = %s", varName, declaredType, exprGoCode)
-	}
-	return fmt.Sprintf("var %s %s", varName, declaredType)
-}
-
-func (v *MyGoTranspiler) VisitTupleLetDecl(ctx *ast.TupleLetDeclContext) interface{} {
-	var ids []string
-	for _, idCtx := range ctx.AllID() {
-		goName := types.FormatVisibility(idCtx.GetText(), ctx.Modifier())
-		ids = append(ids, goName)
-		v.CurrentScope.Define(idCtx.GetText(), goName, symbols.KindVar, "unknown")
-	}
-	exprStr := ctx.Expr().Accept(v).(string)
-	if strings.Contains(exprStr, "?!") {
-		cleanCall := strings.ReplaceAll(exprStr, "?!", "")
-		return fmt.Sprintf("%s, err := %s\nif err != nil {\n\treturn err\n}", strings.Join(ids, ", "), cleanCall)
-	}
-	return fmt.Sprintf("%s := %s", strings.Join(ids, ", "), exprStr)
-}
-
-func (v *MyGoTranspiler) VisitConstDecl(ctx *ast.ConstDeclContext) interface{} {
-	varName := types.FormatVisibility(ctx.ID().GetText(), ctx.Modifier())
-
-	declaredType := ""
-	if ctx.TypeType() != nil {
-		declaredType = v.resolveType(ctx.TypeType())
-	}
-
-	inferredType := "unknown"
-	if declaredType != "" {
-		inferredType = declaredType
-	} else if ctx.Expr() != nil {
-		inferredType = types.InferExprType(ctx.Expr(), v.CurrentScope)
-	}
-
-	v.CurrentScope.Define(ctx.ID().GetText(), varName, symbols.KindVar, inferredType)
-
-	return fmt.Sprintf("const %s %s = %s", varName, declaredType, ctx.Expr().Accept(v).(string))
+	return sig + " " + body
 }

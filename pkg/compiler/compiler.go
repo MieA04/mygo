@@ -19,10 +19,14 @@ func TranspilePackage(pkg *Package, loader *PackageLoader, moduleName string, em
 	for _, f := range pkg.Files {
 		collector.SetCompilationUnit(pkg.Name, f.Path)
 		for _, decl := range f.AST.AllAnnotationDecl() {
-			decl.Accept(collector)
+			if d, ok := decl.(*ast.AnnotationDeclContext); ok {
+				collector.VisitAnnotationDecl(d)
+			}
 		}
 		for _, stmt := range f.AST.AllStatement() {
-			stmt.Accept(collector)
+			if s, ok := stmt.(*ast.StatementContext); ok {
+				collector.VisitStatement(s)
+			}
 		}
 	}
 
@@ -82,15 +86,19 @@ func _mygo_must[T any](v T, err error) T {
 
 	for _, f := range pkg.Files {
 		myTranspiler.SetCurrentFile(f.Path)
-		for _, stmt := range f.AST.AllStatement() {
+		for i, stmt := range f.AST.AllStatement() {
 			// Explicitly cast to concrete type to bypass missing Accept method issue
 			concreteStmt, ok := stmt.(*ast.StatementContext)
 			if !ok {
+				fmt.Printf("DEBUG: Stmt %d is not *StatementContext: %T\n", i, stmt)
 				continue
 			}
 			res := myTranspiler.VisitStatement(concreteStmt)
 			if res != nil {
+				fmt.Printf("DEBUG: Stmt %d generated: %s\n", i, res)
 				body.WriteString(res.(string) + "\n")
+			} else {
+				fmt.Printf("DEBUG: Stmt %d generated nil\n", i)
 			}
 		}
 	}

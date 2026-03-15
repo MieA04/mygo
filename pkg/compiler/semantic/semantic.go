@@ -24,6 +24,15 @@ type SemanticAnalyzer struct {
 	inDeferBlock    bool
 	inSpawnBlock    bool
 	PackageResolver func(name string) *symbols.Scope
+	Diagnostics     []Diagnostic
+}
+
+type Diagnostic struct {
+	Line    int
+	Column  int
+	Message string
+	Code    string
+	Type    string // "error" or "warning"
 }
 
 func NewSemanticAnalyzer(global *symbols.Scope) *SemanticAnalyzer {
@@ -33,6 +42,7 @@ func NewSemanticAnalyzer(global *symbols.Scope) *SemanticAnalyzer {
 		GlobalScope:     global,
 		nonNilGuards:    make(map[string]int),
 		nilGuards:       make(map[string]int),
+		Diagnostics:     []Diagnostic{},
 	}
 }
 
@@ -45,18 +55,48 @@ func (a *SemanticAnalyzer) GetErrors() []string {
 	return a.errors
 }
 
+func (a *SemanticAnalyzer) GetDiagnostics() []Diagnostic {
+	return a.Diagnostics
+}
+
 func (a *SemanticAnalyzer) GetWarnings() []string {
 	return a.warnings
 }
 
-func (a *SemanticAnalyzer) reportTypeError(code, format string, args ...interface{}) {
+func (a *SemanticAnalyzer) reportTypeError(ctx antlr.ParserRuleContext, code, format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
-	a.errors = append(a.errors, fmt.Sprintf("[%s] %s", code, msg))
+	line := 0
+	column := 0
+	if ctx != nil {
+		line = ctx.GetStart().GetLine()
+		column = ctx.GetStart().GetColumn()
+	}
+	a.errors = append(a.errors, fmt.Sprintf("[%s] line %d:%d %s", code, line, column, msg))
+	a.Diagnostics = append(a.Diagnostics, Diagnostic{
+		Line:    line,
+		Column:  column,
+		Message: msg,
+		Code:    code,
+		Type:    "error",
+	})
 }
 
-func (a *SemanticAnalyzer) reportTypeWarning(code, format string, args ...interface{}) {
+func (a *SemanticAnalyzer) reportTypeWarning(ctx antlr.ParserRuleContext, code, format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
-	a.warnings = append(a.warnings, fmt.Sprintf("[%s] %s", code, msg))
+	line := 0
+	column := 0
+	if ctx != nil {
+		line = ctx.GetStart().GetLine()
+		column = ctx.GetStart().GetColumn()
+	}
+	a.warnings = append(a.warnings, fmt.Sprintf("[%s] line %d:%d %s", code, line, column, msg))
+	a.Diagnostics = append(a.Diagnostics, Diagnostic{
+		Line:    line,
+		Column:  column,
+		Message: msg,
+		Code:    code,
+		Type:    "warning",
+	})
 }
 
 func (a *SemanticAnalyzer) pushScope(name string) {
@@ -226,16 +266,26 @@ func (a *SemanticAnalyzer) validateTypeCheckType(typeCtx ast.ITypeTypeContext) s
 	}
 	typeName := types.ResolveTypeWithScope(typeCtx.GetText(), a.CurrentScope)
 	baseType := types.SplitBaseType(typeName)
+
+	// Built-in types check
+	switch baseType {
+	case "int", "int8", "int16", "int32", "int64",
+		"uint", "uint8", "uint16", "uint32", "uint64",
+		"float32", "float64", "string", "bool",
+		"byte", "rune", "any", "error":
+		return typeName
+	}
+
 	sym := a.CurrentScope.Resolve(baseType)
 	if sym == nil {
 		sym = a.CurrentScope.ResolveByGoName(baseType)
 	}
 	if sym == nil {
-		a.reportTypeError("E_IS_TYPE_UNDEFINED", "undefined type '%s' in type check", typeCtx.GetText())
+		a.reportTypeError(typeCtx, "E_IS_TYPE_UNDEFINED", "undefined type '%s' in type check", typeCtx.GetText())
 		return typeName
 	}
 	if sym.Kind != symbols.KindStruct && sym.Kind != symbols.KindTrait {
-		a.reportTypeError("E_IS_TYPE_INVALID_KIND", "'is' keyword only supports Struct or Trait types, got '%s'", sym.Kind)
+		a.reportTypeError(typeCtx, "E_IS_TYPE_INVALID_KIND", "'is' keyword only supports Struct or Trait types, got '%s'", sym.Kind)
 	}
 	return typeName
 }
@@ -280,7 +330,7 @@ func (a *SemanticAnalyzer) validateTraitTypeCheck(expr ast.IExprContext, targetT
 	}
 }
 
-func (a *SemanticAnalyzer) checkAccess(sym *symbols.Symbol, name string) {
+func (a *SemanticAnalyzer) checkAccess(ctx antlr.ParserRuleContext, sym *symbols.Symbol, name string) {
 	if sym == nil {
 		return
 	}
@@ -290,22 +340,58 @@ func (a *SemanticAnalyzer) checkAccess(sym *symbols.Symbol, name string) {
 	// 1. Cross-package check
 	if sym.PackageName != "" && sym.PackageName != a.currentPackage {
 		if sym.Visibility != symbols.VisibilityPublic {
-			a.reportTypeError("E_VISIBILITY_PUBLIC", "symbol '%s' is not public (package '%s')", name, sym.PackageName)
+			a.reportTypeError(ctx, "E_VISIBILITY_PUBLIC", "symbol '%s' is not public (package '%s')", name, sym.PackageName)
 		}
 		return
 	}
 	// 2. File-private check
 	if sym.Visibility == symbols.VisibilityPrivate {
 		if sym.FilePath != "" && a.currentFile != "" && sym.FilePath != a.currentFile {
-			a.reportTypeError("E_VISIBILITY_PRIVATE_FILE", "symbol '%s' is private to file '%s'", name, sym.FilePath)
+			a.reportTypeError(ctx, "E_VISIBILITY_PRIVATE_FILE", "symbol '%s' is private to file '%s'", name, sym.FilePath)
 		}
 	}
 }
 
 func (a *SemanticAnalyzer) VisitProgram(ctx *ast.ProgramContext) interface{} {
+	for _, imp := range ctx.AllImportStmt() {
+		imp.Accept(a)
+	}
 	for _, stmt := range ctx.AllStatement() {
 		stmt.Accept(a)
 	}
+	return nil
+}
+
+func (a *SemanticAnalyzer) VisitImportSpec(ctx *ast.ImportSpecContext) interface{} {
+	path := strings.Trim(ctx.STRING().GetText(), "\"")
+	var alias string
+	if ctx.ID() != nil {
+		alias = ctx.ID().GetText()
+	}
+
+	if a.PackageResolver == nil {
+		return nil
+	}
+
+	scope := a.PackageResolver(path)
+	if scope == nil {
+		// Only report error if we expected to resolve it
+		// For now, let's report warning or error?
+		// If it's a standard library, it should resolve.
+		// If it's a local package, maybe resolver handles it.
+		a.reportTypeError(ctx, "E_IMPORT_FAILED", "failed to import package '%s'", path)
+		return nil
+	}
+
+	if alias == "" {
+		alias = scope.Name
+	}
+
+	sym := a.CurrentScope.Define(alias, alias, symbols.KindPackage, "package")
+	sym.ImportedScope = scope
+	// Imports are file-scoped usually, but MyGo might treat them as package-scoped if in package declaration?
+	// For now, add to current scope (which is file/global scope).
+
 	return nil
 }
 
@@ -347,6 +433,12 @@ func (a *SemanticAnalyzer) VisitFnDecl(ctx *ast.FnDeclContext) interface{} {
 			pName := p.ID().GetText()
 			pType := types.ResolveTypeWithScope(p.TypeType().GetText(), a.CurrentScope)
 			a.CurrentScope.Define(pName, pName, symbols.KindVar, pType)
+		}
+	}
+	if ctx.TypeType() != nil {
+		retText := types.NormalizeTypeName(ctx.TypeType().GetText())
+		if strings.HasSuffix(retText, "?") {
+			a.reportTypeError(ctx, "E_OPTION_RETURN_UNSUPPORTED", "optional return type is not supported in current phase")
 		}
 	}
 
@@ -396,7 +488,7 @@ func (a *SemanticAnalyzer) VisitSingleLetDecl(ctx *ast.SingleLetDeclContext) int
 			inferredType = exprType
 		} else {
 			if !a.isTypeAssignable(inferredType, exprType) {
-				a.reportTypeError("E_TYPE_MISMATCH", "cannot assign type '%s' to variable of type '%s'", exprType, inferredType)
+				a.reportTypeError(ctx, "E_TYPE_MISMATCH", "cannot assign type '%s' to variable of type '%s'", exprType, inferredType)
 			}
 		}
 	}
@@ -407,12 +499,31 @@ func (a *SemanticAnalyzer) VisitSingleLetDecl(ctx *ast.SingleLetDeclContext) int
 	return nil
 }
 
+func (a *SemanticAnalyzer) VisitAssignmentStmt(ctx *ast.AssignmentStmtContext) interface{} {
+	if ctx == nil || len(ctx.AllExpr()) < 2 {
+		return nil
+	}
+	lhs := ctx.Expr(0)
+	rhs := ctx.Expr(1)
+	lhs.Accept(a)
+	rhs.Accept(a)
+	if ctx.GetOp() == nil || ctx.GetOp().GetText() != "=" {
+		return nil
+	}
+	lhsType := types.InferExprType(lhs, a.CurrentScope)
+	rhsType := types.InferExprType(rhs, a.CurrentScope)
+	if !a.isTypeAssignable(lhsType, rhsType) {
+		a.reportTypeError(ctx, "E_ASSIGNMENT_TYPE_MISMATCH", "cannot assign type '%s' to target of type '%s'", rhsType, lhsType)
+	}
+	return nil
+}
+
 func (a *SemanticAnalyzer) VisitReturnStmt(ctx *ast.ReturnStmtContext) interface{} {
 	if a.inDeferBlock {
-		a.reportTypeError("E_DEFER_RETURN", "Cannot use 'return' inside a defer block")
+		a.reportTypeError(ctx, "E_DEFER_RETURN", "Cannot use 'return' inside a defer block")
 	}
 	if a.inSpawnBlock && ctx.Expr() != nil {
-		a.reportTypeError("E_SPAWN_RETURN_VALUE", "Cannot return a value from a spawn block")
+		a.reportTypeError(ctx, "E_SPAWN_RETURN_VALUE", "Cannot return a value from a spawn block")
 	}
 	if ctx.Expr() != nil {
 		ctx.Expr().Accept(a)
@@ -451,11 +562,11 @@ func (a *SemanticAnalyzer) VisitSelectReadBranch(ctx *ast.SelectReadBranchContex
 
 	// Check method name
 	if readCtx.GetMethod().GetText() != "read" {
-		a.reportTypeError("E_SELECT_READ_METHOD", "Select read branch must use .read() method")
+		a.reportTypeError(readCtx, "E_SELECT_READ_METHOD", "Select read branch must use .read() method")
 	}
 
 	if !types.IsChannelType(chType) {
-		a.reportTypeError("E_SELECT_READ_NOT_CHAN", "Select case must read from a channel, got '%s'", chType)
+		a.reportTypeError(chExpr, "E_SELECT_READ_NOT_CHAN", "Select case must read from a channel, got '%s'", chType)
 	} else {
 		elemType := types.GetChannelElementType(chType)
 		// If let vars are present
@@ -475,7 +586,7 @@ func (a *SemanticAnalyzer) VisitSelectReadBranch(ctx *ast.SelectReadBranchContex
 				a.CurrentScope.Define(name, name, symbols.KindVar, elemType)
 				a.CurrentScope.Define(okName, okName, symbols.KindVar, "bool")
 			} else {
-				a.reportTypeError("E_SELECT_READ_VARS", "Select read expects 1 or 2 variables, got %d", len(varIDs))
+				a.reportTypeError(readCtx, "E_SELECT_READ_VARS", "Select read expects 1 or 2 variables, got %d", len(varIDs))
 			}
 		}
 	}
@@ -498,7 +609,7 @@ func (a *SemanticAnalyzer) VisitSelectWriteBranch(ctx *ast.SelectWriteBranchCont
 	writeCtx := ctx.SelectWrite()
 
 	if writeCtx.GetMethod().GetText() != "write" {
-		a.reportTypeError("E_SELECT_WRITE_METHOD", "Select write branch must use .write() method")
+		a.reportTypeError(writeCtx, "E_SELECT_WRITE_METHOD", "Select write branch must use .write() method")
 	}
 
 	chExpr := writeCtx.Expr(0)
@@ -508,11 +619,11 @@ func (a *SemanticAnalyzer) VisitSelectWriteBranch(ctx *ast.SelectWriteBranchCont
 	valType := types.InferExprType(valExpr, a.CurrentScope)
 
 	if !types.IsChannelType(chType) {
-		a.reportTypeError("E_SELECT_WRITE_NOT_CHAN", "Select case must write to a channel, got '%s'", chType)
+		a.reportTypeError(chExpr, "E_SELECT_WRITE_NOT_CHAN", "Select case must write to a channel, got '%s'", chType)
 	} else {
 		elemType := types.GetChannelElementType(chType)
 		if !a.isTypeAssignable(elemType, valType) {
-			a.reportTypeError("E_SELECT_WRITE_TYPE", "Cannot write type '%s' to channel of type '%s'", valType, elemType)
+			a.reportTypeError(valExpr, "E_SELECT_WRITE_TYPE", "Cannot write type '%s' to channel of type '%s'", valType, elemType)
 		}
 	}
 
@@ -566,7 +677,7 @@ func (a *SemanticAnalyzer) VisitDeferStmt(ctx *ast.DeferStmtContext) interface{}
 		}
 
 		if !isValid {
-			a.reportTypeError("E_DEFER_INVALID_EXPR", "defer requires function call or block")
+			a.reportTypeError(expr, "E_DEFER_INVALID_EXPR", "defer requires function call or block")
 		}
 
 		expr.Accept(a)
@@ -577,10 +688,6 @@ func (a *SemanticAnalyzer) VisitDeferStmt(ctx *ast.DeferStmtContext) interface{}
 func (a *SemanticAnalyzer) VisitMatchStmt(ctx *ast.MatchStmtContext) interface{} {
 	matchExpr := ctx.Expr()
 	matchExprType := types.InferExprType(matchExpr, a.CurrentScope)
-	matchTargetName := ""
-	if _, ok := matchExpr.(*ast.IdentifierExprContext); ok {
-		_ = matchTargetName
-	}
 
 	baseType := types.SplitBaseType(matchExprType)
 	enumSym := a.CurrentScope.Resolve(baseType)
@@ -588,44 +695,189 @@ func (a *SemanticAnalyzer) VisitMatchStmt(ctx *ast.MatchStmtContext) interface{}
 		enumSym = a.CurrentScope.ResolveByGoName(baseType)
 	}
 
-	var typeArgs []string
-	if idx := strings.Index(matchExprType, "["); idx != -1 {
-		end := strings.LastIndex(matchExprType, "]")
-		if end > idx {
-			typeArgs = types.SplitTopLevelTypeArgs(matchExprType[idx+1 : end])
-		}
-	}
-	_ = typeArgs
+	isEnumMatch := enumSym != nil && enumSym.Kind == symbols.KindEnum
 
 	for _, caseCtx := range ctx.AllMatchCase() {
 		a.pushScope("case_block")
 
 		var blockCtx ast.IBlockContext
+		var stmtCtx ast.IStatementContext
 
 		if valCase, ok := caseCtx.(*ast.ValueMatchCaseContext); ok {
+			blockCtx = valCase.Block()
+			stmtCtx = valCase.Statement()
+
 			for _, patternExpr := range valCase.AllExpr() {
-				var variantName string
-				if ma, ok := patternExpr.(*ast.MemberAccessExprContext); ok {
-					variantName = ma.ID().GetText()
-				} else if mc, ok := patternExpr.(*ast.MethodCallExprContext); ok {
-					variantName = mc.ID().GetText()
-					if enumSym != nil && enumSym.Kind == symbols.KindEnum {
-						if _, ok := enumSym.Variants[variantName]; ok {
-							// Check
+				if isEnumMatch {
+					// Enum Pattern Matching
+					variantName, args := a.parseEnumPattern(patternExpr, enumSym)
+					if variantName != "" {
+						// It is a valid variant pattern
+						variantSym, ok := enumSym.Variants[variantName]
+						if !ok {
+							a.reportTypeError(patternExpr, "E_ENUM_VARIANT_NOT_FOUND", "Enum '%s' has no variant '%s'", enumSym.MyGoName, variantName)
+							continue
+						}
+
+						// Validate arg count
+						// We need to know expected types from variantSym
+						// variantSym.Type stores the variant struct type? Or we look at fields?
+						// In MyGo Enums, variants are structs. Item1, Item2...
+						// We need to know how many items.
+						// variantSym.FieldMap should contain Item1, Item2 etc.
+
+						expectedCount := 0
+						// Count "ItemX" fields
+						for fName := range variantSym.FieldMap {
+							if strings.HasPrefix(fName, "Item") {
+								expectedCount++
+							}
+						}
+						// This simple count might be wrong if there are other fields, but currently Enum variants only have ItemX.
+						// Better: The grammar `enumVariant: ID ('(' typeList ')')?`
+						// The symbol table should store the types of the variant fields in order.
+						// For now, let's assume strict positional mapping if args are provided.
+
+						if len(args) > 0 {
+							// Check count
+							// If we can't easily get the count from symbol (if not stored explicitly), we might skip count check or improve symbol table.
+							// But for binding, we definitely need to define them.
+
+							// Define variables
+							// We need types.
+							// For Result.OK(int), Item1 is int.
+							// We need to resolve the type of Item{i+1} from variantSym.
+
+							for i, argName := range args {
+								itemField := fmt.Sprintf("Item%d", i+1)
+								if fieldSym, ok := variantSym.FieldMap[itemField]; ok {
+									// Handle generics substitution if needed
+									fieldType := fieldSym.Type
+									if idx := strings.Index(matchExprType, "["); idx != -1 {
+										// This is a rough substitution. Ideally use a proper substitution helper.
+										// If enum is Result<T>, and matchExprType is Result<int>.
+										// fieldType might be "T". We need to map T -> int.
+										// For now, let's define as "unknown" or try to infer?
+										// Or just use the fieldType. If it's a generic param T, it might be resolved if we are inside a generic function?
+										// But here we are instantiating.
+
+										// TODO: Proper generic substitution.
+										// For now, we define them.
+									}
+									a.CurrentScope.Define(argName, argName, symbols.KindVar, fieldType)
+								} else {
+									a.reportTypeError(patternExpr, "E_ENUM_PATTERN_ARG_COUNT", "Variant '%s' has no field for argument %d", variantName, i+1)
+								}
+							}
+						}
+					} else {
+						// Not a variant pattern?
+						// Maybe a catch-all variable?
+						// But in Enum match, we usually expect variants.
+						// If it is a simple identifier, it might be a catch-all binding if it doesn't match a variant?
+						// Rust allows `match x { y => ... }` where y binds to x.
+						if idCtx, ok := patternExpr.(*ast.IdentifierExprContext); ok {
+							name := idCtx.QualifiedName().GetText()
+							// If name is not a variant (checked inside parseEnumPattern), treat as variable binding
+							if name != "_" && name != "true" && name != "false" {
+								// Ensure it's not a constant or variable in scope
+								if a.CurrentScope.Resolve(name) == nil {
+									a.CurrentScope.Define(name, name, symbols.KindVar, matchExprType)
+								}
+							}
+						}
+					}
+				} else {
+					// Normal Match (Switch-like)
+					// If pattern is a simple identifier and not a constant, treat as binding?
+					if idCtx, ok := patternExpr.(*ast.IdentifierExprContext); ok {
+						name := idCtx.QualifiedName().GetText()
+						// Check if it resolves to a constant or variable
+						sym := a.CurrentScope.Resolve(name)
+						if sym == nil && name != "_" && name != "true" && name != "false" {
+							// Treat as new variable binding (catch-all)
+							a.CurrentScope.Define(name, name, symbols.KindVar, matchExprType)
 						}
 					}
 				}
 			}
-			blockCtx = valCase.Block()
+
+		} else if typeCase, ok := caseCtx.(*ast.TypeMatchCaseContext); ok {
+			blockCtx = typeCase.Block()
+			stmtCtx = typeCase.Statement()
+			// 'is' Type => block
+			// Transpiler handles 'is' type narrowing.
+			// Semantic analyzer should verify type exists.
+			typeType := typeCase.TypeType()
+			_ = a.validateTypeCheckType(typeType)
+
+		} else if defCase, ok := caseCtx.(*ast.DefaultMatchCaseContext); ok {
+			blockCtx = defCase.Block()
+			stmtCtx = defCase.Statement()
 		}
+
 		if blockCtx != nil {
-			for _, stmt := range blockCtx.AllStatement() {
-				stmt.Accept(a)
+			// Visit Block
+			if b, ok := blockCtx.(*ast.BlockContext); ok {
+				// We manually visit statements to avoid creating another scope layer,
+				// or we just let VisitBlock create one.
+				// Current implementation of VisitBlock creates a scope "block".
+				// We already pushed "case_block".
+				// So variables defined in "case_block" are visible in "block".
+				// That works.
+				b.Accept(a)
 			}
+		} else if stmtCtx != nil {
+			stmtCtx.Accept(a)
 		}
+
 		a.popScope()
 	}
 	return nil
+}
+
+func (a *SemanticAnalyzer) parseEnumPattern(expr ast.IExprContext, enumSym *symbols.Symbol) (string, []string) {
+	if fc, ok := expr.(*ast.FuncCallExprContext); ok {
+		// OK(val) or Result.OK(val)
+		qName := fc.QualifiedName().GetText()
+		var variantName string
+
+		if strings.Contains(qName, ".") {
+			parts := strings.Split(qName, ".")
+			if parts[0] == enumSym.MyGoName || parts[0] == enumSym.GoName {
+				variantName = parts[1]
+			}
+		} else {
+			variantName = qName
+		}
+
+		if variantName != "" {
+			var args []string
+			if fc.ExprList() != nil {
+				for _, arg := range fc.ExprList().(*ast.ExprListContext).AllExpr() {
+					if id, ok := arg.(*ast.IdentifierExprContext); ok {
+						args = append(args, id.GetText())
+					}
+				}
+			}
+			return variantName, args
+		}
+	} else if ma, ok := expr.(*ast.MemberAccessExprContext); ok {
+		// Result.OK
+		if id, ok := ma.Expr().(*ast.IdentifierExprContext); ok {
+			name := id.GetText()
+			if name == enumSym.MyGoName || name == enumSym.GoName {
+				return ma.ID().GetText(), nil
+			}
+		}
+	} else if id, ok := expr.(*ast.IdentifierExprContext); ok {
+		// OK
+		name := id.GetText()
+		if _, ok := enumSym.Variants[name]; ok {
+			return name, nil
+		}
+	}
+	return "", nil
 }
 
 func (a *SemanticAnalyzer) VisitMemberAccessExpr(ctx *ast.MemberAccessExprContext) interface{} {
@@ -637,15 +889,15 @@ func (a *SemanticAnalyzer) VisitMemberAccessExpr(ctx *ast.MemberAccessExprContex
 
 	if sym := a.CurrentScope.Resolve(objType); sym != nil && sym.Kind == symbols.KindPackage {
 		if sym.ImportedScope == nil {
-			a.reportTypeError("E_PKG_SCOPE_MISSING", "package '%s' has no scope", objType)
+			a.reportTypeError(ctx, "E_PKG_SCOPE_MISSING", "package '%s' has no scope", objType)
 			return nil
 		}
 		memberSym := sym.ImportedScope.Resolve(fieldName)
 		if memberSym == nil {
-			a.reportTypeError("E_PKG_MEMBER_NOT_FOUND", "package '%s' has no member '%s'", objType, fieldName)
+			a.reportTypeError(ctx, "E_PKG_MEMBER_NOT_FOUND", "package '%s' has no member '%s'", objType, fieldName)
 			return nil
 		}
-		a.checkAccess(memberSym, fieldName)
+		a.checkAccess(ctx, memberSym, fieldName)
 		return nil
 	}
 
@@ -662,7 +914,7 @@ func (a *SemanticAnalyzer) VisitMemberAccessExpr(ctx *ast.MemberAccessExprContex
 
 		if enumSym != nil && enumSym.Kind == symbols.KindEnum {
 			if variantSym, ok := enumSym.Variants[variantName]; ok {
-				if _, ok := variantSym.Fields[fieldName]; ok {
+				if _, ok := variantSym.FieldMap[fieldName]; ok {
 					return nil
 				}
 			}
@@ -680,6 +932,46 @@ func (a *SemanticAnalyzer) VisitTraitDecl(ctx *ast.TraitDeclContext) interface{}
 
 func (a *SemanticAnalyzer) VisitBindTraitDecl(ctx *ast.BindTraitDeclContext) interface{} {
 	// Simplified implementation
+	// Collect directives
+	for _, item := range ctx.AllTraitBodyItem() {
+		if item.CompositionDirective() != nil {
+			_ = item.CompositionDirective().Accept(a)
+		}
+	}
+	return nil
+}
+
+func (a *SemanticAnalyzer) VisitBanDirective(ctx *ast.BanDirectiveContext) interface{} {
+	var methods []string
+	for _, id := range ctx.AllID() {
+		methods = append(methods, id.GetText())
+	}
+	return methods
+}
+
+type FlipBanItem struct {
+	Method string
+	Trait  string
+}
+
+func (a *SemanticAnalyzer) VisitFlipBanDirective(ctx *ast.FlipBanDirectiveContext) interface{} {
+	var items []FlipBanItem
+	for _, itemCtx := range ctx.AllFlipBanItem() {
+		if item, ok := itemCtx.Accept(a).(FlipBanItem); ok {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+func (a *SemanticAnalyzer) VisitFlipBanItem(ctx *ast.FlipBanItemContext) interface{} {
+	ids := ctx.AllID()
+	if len(ids) == 2 {
+		return FlipBanItem{
+			Method: ids[0].GetText(),
+			Trait:  ids[1].GetText(),
+		}
+	}
 	return nil
 }
 
@@ -691,11 +983,11 @@ func (a *SemanticAnalyzer) VisitStructLiteralExpr(ctx *ast.StructLiteralExprCont
 	}
 
 	if sym != nil {
-		a.checkAccess(sym, structName)
+		a.checkAccess(ctx, sym, structName)
 	}
 
 	if sym != nil && sym.Kind == symbols.KindTrait {
-		a.reportTypeError("E_TRAIT_INSTANTIATION_FORBIDDEN", "cannot instantiate trait '%s'; use a bound struct or concrete value", structName)
+		a.reportTypeError(ctx, "E_TRAIT_INSTANTIATION_FORBIDDEN", "cannot instantiate trait '%s'; use a bound struct or concrete value", structName)
 		return nil
 	}
 	if sym != nil && sym.Kind == symbols.KindStruct {
@@ -718,7 +1010,7 @@ func (a *SemanticAnalyzer) VisitStructLiteralExpr(ctx *ast.StructLiteralExprCont
 		}
 
 		if err != nil {
-			a.reportTypeError("E_GENERIC_ARGS_STRUCT_RESOLVE", "Error in struct instantiation %s: %v", structName, err)
+			a.reportTypeError(ctx, "E_GENERIC_ARGS_STRUCT_RESOLVE", "Error in struct instantiation %s: %v", structName, err)
 			return nil
 		}
 
@@ -727,7 +1019,7 @@ func (a *SemanticAnalyzer) VisitStructLiteralExpr(ctx *ast.StructLiteralExprCont
 				if i < len(sym.GenericParams) {
 					constraint := sym.GenericParams[i].ConstraintMyGo
 					if !types.CheckTypeConstraint(arg, constraint, a.CurrentScope) {
-						a.reportTypeError("E_GENERIC_CONSTRAINT_STRUCT", "Generic argument '%s' for '%s' does not satisfy constraint '%s'", arg, sym.GenericParams[i].Name, constraint)
+						a.reportTypeError(ctx, "E_GENERIC_CONSTRAINT_STRUCT", "Generic argument '%s' for '%s' does not satisfy constraint '%s'", arg, sym.GenericParams[i].Name, constraint)
 					}
 				}
 			}
@@ -744,7 +1036,7 @@ func (a *SemanticAnalyzer) VisitFuncCallExpr(ctx *ast.FuncCallExprContext) inter
 	}
 
 	if sym != nil {
-		a.checkAccess(sym, callee)
+		a.checkAccess(ctx, sym, callee)
 	}
 
 	var genericArgs []string
@@ -755,13 +1047,13 @@ func (a *SemanticAnalyzer) VisitFuncCallExpr(ctx *ast.FuncCallExprContext) inter
 			return t
 		}, true)
 		if err != nil {
-			a.reportTypeError("E_GENERIC_ARGS_FUNC_RESOLVE", "Error in function call %s: %v", callee, err)
+			a.reportTypeError(ctx, "E_GENERIC_ARGS_FUNC_RESOLVE", "Error in function call %s: %v", callee, err)
 			return nil
 		}
 		for i, arg := range genericArgs {
 			constraint := sym.GenericParams[i].ConstraintMyGo
 			if !types.CheckTypeConstraint(arg, constraint, a.CurrentScope) {
-				a.reportTypeError("E_GENERIC_CONSTRAINT_FUNC", "Generic argument '%s' for '%s' does not satisfy constraint '%s'", arg, sym.GenericParams[i].Name, constraint)
+				a.reportTypeError(ctx, "E_GENERIC_CONSTRAINT_FUNC", "Generic argument '%s' for '%s' does not satisfy constraint '%s'", arg, sym.GenericParams[i].Name, constraint)
 			}
 		}
 	}
@@ -794,31 +1086,31 @@ func (a *SemanticAnalyzer) VisitMethodCallExpr(ctx *ast.MethodCallExprContext) i
 			// .read() -> T
 			// Check args count = 0
 			if ctx.ExprList() != nil && len(ctx.ExprList().(*ast.ExprListContext).AllExpr()) > 0 {
-				a.reportTypeError("E_CHAN_READ_ARGS", "Channel.read() takes no arguments")
+				a.reportTypeError(ctx, "E_CHAN_READ_ARGS", "Channel.read() takes no arguments")
 			}
 			return nil
 		} else if methodName == "write" {
 			// .write(val) -> void
 			// Check args count = 1
 			if ctx.ExprList() == nil || len(ctx.ExprList().(*ast.ExprListContext).AllExpr()) != 1 {
-				a.reportTypeError("E_CHAN_WRITE_ARGS", "Channel.write(val) takes exactly 1 argument")
+				a.reportTypeError(ctx, "E_CHAN_WRITE_ARGS", "Channel.write(val) takes exactly 1 argument")
 			} else {
 				argExpr := ctx.ExprList().(*ast.ExprListContext).Expr(0)
 				argType := types.InferExprType(argExpr, a.CurrentScope)
 				elemType := types.GetChannelElementType(objType)
 				if !a.isTypeAssignable(elemType, argType) {
-					a.reportTypeError("E_CHAN_WRITE_TYPE", "Cannot write type '%s' to channel of type '%s'", argType, elemType)
+					a.reportTypeError(ctx, "E_CHAN_WRITE_TYPE", "Cannot write type '%s' to channel of type '%s'", argType, elemType)
 				}
 			}
 			return nil
 		} else if methodName == "close" {
 			// .close() -> void
 			if ctx.ExprList() != nil && len(ctx.ExprList().(*ast.ExprListContext).AllExpr()) > 0 {
-				a.reportTypeError("E_CHAN_CLOSE_ARGS", "Channel.close() takes no arguments")
+				a.reportTypeError(ctx, "E_CHAN_CLOSE_ARGS", "Channel.close() takes no arguments")
 			}
 			return nil
 		} else {
-			a.reportTypeError("E_CHAN_METHOD", "Channel only supports read, write, close methods, got '%s'", methodName)
+			a.reportTypeError(ctx, "E_CHAN_METHOD", "Channel only supports read, write, close methods, got '%s'", methodName)
 			return nil
 		}
 	}
@@ -843,7 +1135,7 @@ func (a *SemanticAnalyzer) VisitMethodCallExpr(ctx *ast.MethodCallExprContext) i
 					for i, arg := range args {
 						constraint := sym.GenericParams[i].ConstraintMyGo
 						if !types.CheckTypeConstraint(arg, constraint, a.CurrentScope) {
-							a.reportTypeError("E_GENERIC_CONSTRAINT_ENUM", "Generic argument '%s' for Enum '%s' does not satisfy constraint '%s'", arg, sym.GenericParams[i].Name, constraint)
+							a.reportTypeError(ctx, "E_GENERIC_CONSTRAINT_ENUM", "Generic argument '%s' for Enum '%s' does not satisfy constraint '%s'", arg, sym.GenericParams[i].Name, constraint)
 						}
 					}
 				}
@@ -867,13 +1159,13 @@ func (a *SemanticAnalyzer) VisitMethodCallExpr(ctx *ast.MethodCallExprContext) i
 					return t
 				}, true)
 				if err != nil {
-					a.reportTypeError("E_GENERIC_ARGS_METHOD_RESOLVE", "Error in method call %s.%s: %v", baseType, methodName, err)
+					a.reportTypeError(ctx, "E_GENERIC_ARGS_METHOD_RESOLVE", "Error in method call %s.%s: %v", baseType, methodName, err)
 					return nil
 				}
 				for i, arg := range args {
 					constraint := methodGenericParams[i].ConstraintMyGo
 					if !types.CheckTypeConstraint(arg, constraint, a.CurrentScope) {
-						a.reportTypeError("E_GENERIC_CONSTRAINT_METHOD", "Generic argument '%s' for method '%s' does not satisfy constraint '%s'", arg, methodGenericParams[i].Name, constraint)
+						a.reportTypeError(ctx, "E_GENERIC_CONSTRAINT_METHOD", "Generic argument '%s' for method '%s' does not satisfy constraint '%s'", arg, methodGenericParams[i].Name, constraint)
 					}
 				}
 			}
@@ -884,20 +1176,20 @@ func (a *SemanticAnalyzer) VisitMethodCallExpr(ctx *ast.MethodCallExprContext) i
 
 func (a *SemanticAnalyzer) VisitDerefExpr(ctx *ast.DerefExprContext) interface{} {
 	if a.isNilLiteralExpr(ctx.Expr()) {
-		a.reportTypeError("E_PTR_DEREF_NIL", "cannot dereference nil; assign a non-nil pointer before dereference")
+		a.reportTypeError(ctx, "E_PTR_DEREF_NIL", "cannot dereference nil; assign a non-nil pointer before dereference")
 		ctx.Expr().Accept(a)
 		return nil
 	}
 	if a.isGuardedNilExpr(ctx.Expr()) {
-		a.reportTypeError("E_PTR_DEREF_GUARDED_NIL", "cannot dereference pointer proven nil in current branch")
+		a.reportTypeError(ctx, "E_PTR_DEREF_GUARDED_NIL", "cannot dereference pointer proven nil in current branch")
 		ctx.Expr().Accept(a)
 		return nil
 	}
 	exprType := types.InferExprType(ctx.Expr(), a.CurrentScope)
 	if !types.IsPointerType(exprType) {
-		a.reportTypeError("E_PTR_DEREF_NON_POINTER", "cannot dereference non-pointer type '%s'", exprType)
+		a.reportTypeError(ctx, "E_PTR_DEREF_NON_POINTER", "cannot dereference non-pointer type '%s'", exprType)
 	} else if !a.isGuardedNonNilExpr(ctx.Expr()) {
-		a.reportTypeWarning("W_PTR_DEREF_NIL_POSSIBLE", "possible nil dereference on pointer type '%s'", exprType)
+		a.reportTypeWarning(ctx, "W_PTR_DEREF_NIL_POSSIBLE", "possible nil dereference on pointer type '%s'", exprType)
 	}
 	ctx.Expr().Accept(a)
 	return nil
@@ -942,7 +1234,7 @@ func (a *SemanticAnalyzer) VisitIdentifierExpr(ctx *ast.IdentifierExprContext) i
 		sym = a.CurrentScope.ResolveByGoName(name)
 	}
 	if sym != nil {
-		a.checkAccess(sym, name)
+		a.checkAccess(ctx, sym, name)
 	}
 	return nil
 }
@@ -998,18 +1290,12 @@ func (a *SemanticAnalyzer) VisitArrayIndexExpr(ctx *ast.ArrayIndexExprContext) i
 
 func (a *SemanticAnalyzer) VisitTryUnwrapExpr(ctx *ast.TryUnwrapExprContext) interface{} {
 	if a.inDeferBlock {
-		a.reportTypeError("E_DEFER_TRY_UNWRAP", "Cannot use '?!' inside a defer block")
+		a.reportTypeError(ctx, "E_DEFER_TRY_UNWRAP", "Cannot use '?!' inside a defer block")
 	}
 	if a.inSpawnBlock {
-		a.reportTypeError("E_SPAWN_TRY_UNWRAP", "Cannot use '?!' inside a spawn block")
+		a.reportTypeError(ctx, "E_SPAWN_TRY_UNWRAP", "Cannot use '?!' inside a spawn block")
 	}
 	ctx.Expr().Accept(a)
-	if ctx.Block() != nil {
-		ctx.Block().Accept(a)
-	}
-	if ctx.Statement() != nil {
-		ctx.Statement().Accept(a)
-	}
 	return nil
 }
 

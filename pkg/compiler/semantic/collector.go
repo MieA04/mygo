@@ -20,7 +20,9 @@ type DeclarationCollector struct {
 }
 
 func NewDeclarationCollector(global *symbols.Scope) *DeclarationCollector {
-	return &DeclarationCollector{BaseMyGoVisitor: &ast.BaseMyGoVisitor{}, CurrentScope: global}
+	d := &DeclarationCollector{BaseMyGoVisitor: &ast.BaseMyGoVisitor{}, CurrentScope: global}
+	var _ ast.MyGoVisitor = d
+	return d
 }
 
 func (d *DeclarationCollector) SetCompilationUnit(packageName, filePath string) {
@@ -66,14 +68,17 @@ func (d *DeclarationCollector) defineSymbol(mygoName, goName string, kind symbol
 }
 
 func (d *DeclarationCollector) VisitProgram(ctx *ast.ProgramContext) interface{} {
-	for _, stmt := range ctx.AllStatement() {
-		stmt.Accept(d)
+	for _, child := range ctx.GetChildren() {
+		if tree, ok := child.(antlr.ParseTree); ok {
+			tree.Accept(d)
+		}
 	}
 	return nil
 }
 
 func (d *DeclarationCollector) VisitAnnotationDecl(ctx *ast.AnnotationDeclContext) interface{} {
 	annName := ctx.ID().GetText()
+	fmt.Printf("DEBUG: DeclarationCollector visiting annotation: %s\n", annName)
 	// Annotations are currently package-private by default as per grammar
 	sym := d.defineSymbol(annName, annName, symbols.KindAnnotation, "annotation", nil, nil)
 	sym.ASTNode = ctx
@@ -87,6 +92,20 @@ func (d *DeclarationCollector) VisitStatement(ctx *ast.StatementContext) interfa
 	if child == nil {
 		return nil
 	}
+
+	if s, ok := child.(*ast.StructDeclContext); ok {
+		return d.VisitStructDecl(s)
+	}
+	if e, ok := child.(*ast.EnumDeclContext); ok {
+		return d.VisitEnumDecl(e)
+	}
+	if f, ok := child.(*ast.FnDeclContext); ok {
+		return d.VisitFnDecl(f)
+	}
+	if t, ok := child.(*ast.TraitDeclContext); ok {
+		return d.VisitTraitDecl(t)
+	}
+
 	if tree, ok := child.(antlr.ParseTree); ok {
 		return tree.Accept(d)
 	}
@@ -103,12 +122,25 @@ func (d *DeclarationCollector) VisitStructDecl(ctx *ast.StructDeclContext) inter
 		fmt.Printf("Type Error: %s\n", issue.Error())
 	}
 	sym.GenericParams = mergedMeta
-	sym.Fields = make(map[string]string)
+	sym.Fields = []symbols.FieldSymbol{}
+	sym.FieldMap = make(map[string]*symbols.FieldSymbol)
 
 	for _, field := range ctx.AllStructField() {
 		fieldName := field.ID().GetText()
 		fieldType := types.ResolveTypeWithScope(field.TypeType().GetText(), d.CurrentScope)
-		sym.Fields[fieldName] = fieldType
+
+		tag := ""
+		if field.STRING() != nil {
+			tag = field.STRING().GetText()
+		}
+
+		fieldSym := symbols.FieldSymbol{
+			Name: fieldName,
+			Type: fieldType,
+			Tag:  tag,
+		}
+		sym.Fields = append(sym.Fields, fieldSym)
+		sym.FieldMap[fieldName] = &sym.Fields[len(sym.Fields)-1]
 	}
 	return nil
 }
@@ -133,7 +165,8 @@ func (d *DeclarationCollector) VisitEnumDecl(ctx *ast.EnumDeclContext) interface
 			Kind:          symbols.KindStruct, // Treat variant as a struct-like entity
 			Type:          enumName,           // It belongs to this Enum type
 			GenericParams: sym.GenericParams,  // Inherit generics
-			Fields:        make(map[string]string),
+			Fields:        []symbols.FieldSymbol{},
+			FieldMap:      make(map[string]*symbols.FieldSymbol),
 		}
 
 		// Add fields if present (e.g. Some(T))
@@ -141,7 +174,14 @@ func (d *DeclarationCollector) VisitEnumDecl(ctx *ast.EnumDeclContext) interface
 			for i, typeCtx := range member.TypeList().(*ast.TypeListContext).AllTypeType() {
 				fieldName := fmt.Sprintf("Item%d", i+1)
 				fieldType := types.ResolveTypeWithScope(typeCtx.GetText(), d.CurrentScope)
-				variantSym.Fields[fieldName] = fieldType
+
+				fieldSym := symbols.FieldSymbol{
+					Name: fieldName,
+					Type: fieldType,
+					Tag:  "",
+				}
+				variantSym.Fields = append(variantSym.Fields, fieldSym)
+				variantSym.FieldMap[fieldName] = &variantSym.Fields[len(variantSym.Fields)-1]
 			}
 		}
 
